@@ -323,27 +323,33 @@ class InvoiceGeneratorApp:
         inv_date_var = tk.StringVar()
         due_date_var = tk.StringVar()
 
-        ttk.Label(frame, text="Nom société").grid(row=0, column=0, sticky="w", **pad)
+        company_name_label = ttk.Label(frame, text="Nom société")
+        company_name_label.grid(row=0, column=0, sticky="w", **pad)
         company_name_entry = ttk.Entry(frame, textvariable=company_name_var)
         company_name_entry.grid(row=0, column=1, sticky="we", **pad)
 
-        ttk.Label(frame, text="Adresse (séparer par ';')").grid(row=1, column=0, sticky="w", **pad)
+        company_address_label = ttk.Label(frame, text="Adresse (séparer par ';')")
+        company_address_label.grid(row=1, column=0, sticky="w", **pad)
         company_address_entry = ttk.Entry(frame, textvariable=company_address_var)
         company_address_entry.grid(row=1, column=1, sticky="we", **pad)
 
-        ttk.Label(frame, text="SIRET").grid(row=2, column=0, sticky="w", **pad)
+        company_siret_label = ttk.Label(frame, text="SIRET")
+        company_siret_label.grid(row=2, column=0, sticky="w", **pad)
         company_siret_entry = ttk.Entry(frame, textvariable=company_siret_var)
         company_siret_entry.grid(row=2, column=1, sticky="we", **pad)
 
-        ttk.Label(frame, text="Montants (séparer par ';')").grid(row=3, column=0, sticky="w", **pad)
+        amounts_label = ttk.Label(frame, text="Montants (séparer par ';')")
+        amounts_label.grid(row=3, column=0, sticky="w", **pad)
         amounts_entry = ttk.Entry(frame, textvariable=amounts_var)
         amounts_entry.grid(row=3, column=1, sticky="we", **pad)
 
-        ttk.Label(frame, text="Date facture (JJ-MM-AAAA)").grid(row=4, column=0, sticky="w", **pad)
+        inv_date_label = ttk.Label(frame, text="Date facture (JJ-MM-AAAA)")
+        inv_date_label.grid(row=4, column=0, sticky="w", **pad)
         inv_date_entry = ttk.Entry(frame, textvariable=inv_date_var)
         inv_date_entry.grid(row=4, column=1, sticky="we", **pad)
 
-        ttk.Label(frame, text="Date échéance (JJ-MM-AAAA)").grid(row=5, column=0, sticky="w", **pad)
+        due_date_label = ttk.Label(frame, text="Date échéance (JJ-MM-AAAA)")
+        due_date_label.grid(row=5, column=0, sticky="w", **pad)
         due_date_entry = ttk.Entry(frame, textvariable=due_date_var)
         due_date_entry.grid(row=5, column=1, sticky="we", **pad)
 
@@ -352,13 +358,19 @@ class InvoiceGeneratorApp:
             "company_name_var": company_name_var,
             "company_address_var": company_address_var,
             "company_siret_var": company_siret_var,
+            "company_name_label": company_name_label,
             "company_name_entry": company_name_entry,
+            "company_address_label": company_address_label,
             "company_address_entry": company_address_entry,
+            "company_siret_label": company_siret_label,
             "company_siret_entry": company_siret_entry,
+            "amounts_label": amounts_label,
             "amounts_var": amounts_var,
             "amounts_entry": amounts_entry,
+            "inv_date_label": inv_date_label,
             "inv_date_var": inv_date_var,
             "inv_date_entry": inv_date_entry,
+            "due_date_label": due_date_label,
             "due_date_var": due_date_var,
             "due_date_entry": due_date_entry,
         }
@@ -379,26 +391,41 @@ class InvoiceGeneratorApp:
         custom_amounts = self.custom_amounts_var.get()
         custom_dates = self.custom_dates_var.get()
         for section in self.invoice_sections:
+            # Affichage/masquage des champs société par facture
             if same:
-                section["company_name_entry"].state(["disabled"])
-                section["company_address_entry"].state(["disabled"])
-                section["company_siret_entry"].state(["disabled"])
+                section["company_name_label"].grid_remove()
+                section["company_name_entry"].grid_remove()
+                section["company_address_label"].grid_remove()
+                section["company_address_entry"].grid_remove()
+                section["company_siret_label"].grid_remove()
+                section["company_siret_entry"].grid_remove()
             else:
-                section["company_name_entry"].state(["!disabled"])
-                section["company_address_entry"].state(["!disabled"])
-                section["company_siret_entry"].state(["!disabled"])
+                section["company_name_label"].grid()
+                section["company_name_entry"].grid()
+                section["company_address_label"].grid()
+                section["company_address_entry"].grid()
+                section["company_siret_label"].grid()
+                section["company_siret_entry"].grid()
 
+            # Affichage/masquage des montants personnalisés
             if custom_amounts:
-                section["amounts_entry"].state(["!disabled"])
+                section["amounts_label"].grid()
+                section["amounts_entry"].grid()
             else:
-                section["amounts_entry"].state(["disabled"])
+                section["amounts_label"].grid_remove()
+                section["amounts_entry"].grid_remove()
 
+            # Affichage/masquage des dates personnalisées
             if custom_dates:
-                section["inv_date_entry"].state(["!disabled"])
-                section["due_date_entry"].state(["!disabled"])
+                section["inv_date_label"].grid()
+                section["inv_date_entry"].grid()
+                section["due_date_label"].grid()
+                section["due_date_entry"].grid()
             else:
-                section["inv_date_entry"].state(["disabled"])
-                section["due_date_entry"].state(["disabled"])
+                section["inv_date_label"].grid_remove()
+                section["inv_date_entry"].grid_remove()
+                section["due_date_label"].grid_remove()
+                section["due_date_entry"].grid_remove()
 
     def generate_invoices(self):
         n = self._get_invoice_count()
