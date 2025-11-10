@@ -204,6 +204,7 @@ class InvoiceGeneratorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Générateur de factures PDF")
+        self._setup_theme()
         self.n_var = tk.IntVar(value=1)
         self.same_company_var = tk.BooleanVar(value=True)
         self.custom_amounts_var = tk.BooleanVar(value=False)
@@ -219,6 +220,51 @@ class InvoiceGeneratorApp:
         self.invoice_sections = []
         self._updating_count = False
         self._build_ui()
+
+    def _setup_theme(self):
+        self.style = ttk.Style(self.root)
+        theme_candidates = [
+            os.path.join(BASE_DIR, "Azure-ttk-theme", "azure.tcl"),
+            os.path.join(BASE_DIR, "azure.tcl"),
+        ]
+        azure_active = False
+        for theme_path in theme_candidates:
+            if not os.path.exists(theme_path):
+                continue
+            try:
+                norm = theme_path.replace("\\", "/")
+                self.root.tk.call("source", norm)
+                try:
+                    self.root.tk.call("set_theme", "light")
+                except Exception:
+                    # fallback direct si set_theme non dispo
+                    self.root.tk.call("ttk::style", "theme", "use", "azure-light")
+                break
+            except Exception:
+                continue
+        try:
+            current = self.root.tk.call("ttk::style", "theme", "use")
+            azure_active = current in ("azure-light", "azure-dark")
+        except Exception:
+            azure_active = False
+
+        self.style.configure(".", font=("Segoe UI", 10))
+
+        if azure_active:
+            bg = self.style.lookup(".", "background") or self.style.lookup("TFrame", "background") or "#f0f0f0"
+            self.root.configure(bg=bg)
+            self.bg_color = bg
+        else:
+            self.root.configure(bg="#e5e7eb")
+            self.style.configure("TFrame", background="#f3f4f6")
+            self.style.configure("TLabel", background="#f3f4f6")
+            self.style.configure("TCheckbutton", background="#f3f4f6")
+            self.style.configure("TLabelframe", background="#ffffff")
+            self.style.configure("TLabelframe.Label", background="#ffffff", font=("Segoe UI", 10, "bold"))
+            self.bg_color = "#f3f4f6"
+
+        self.style.configure("Accent.TButton", padding=8, font=("Segoe UI", 10, "bold"))
+
 
     def _build_ui(self):
         padding = {"padx": 10, "pady": 5}
@@ -265,6 +311,10 @@ class InvoiceGeneratorApp:
         sections_frame.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
 
         self.sections_canvas = tk.Canvas(sections_frame, height=260, borderwidth=0, highlightthickness=0)
+        try:
+            self.sections_canvas.configure(bg=self.bg_color)
+        except Exception:
+            pass
         scrollbar = ttk.Scrollbar(sections_frame, orient="vertical", command=self.sections_canvas.yview)
         self.sections_canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
@@ -274,7 +324,7 @@ class InvoiceGeneratorApp:
         self.invoices_container.bind("<Configure>", lambda e: self.sections_canvas.configure(scrollregion=self.sections_canvas.bbox("all")))
         self.sections_canvas.create_window((0, 0), window=self.invoices_container, anchor="nw")
 
-        self.generate_button = ttk.Button(frame, text="Générer", command=self.generate_invoices)
+        self.generate_button = ttk.Button(frame, text="Générer", style="Accent.TButton", command=self.generate_invoices)
         self.generate_button.grid(row=12, column=0, columnspan=2, pady=15)
 
         ttk.Label(frame, textvariable=self.status_var, foreground="green").grid(row=13, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 10))
@@ -282,6 +332,8 @@ class InvoiceGeneratorApp:
         frame.columnconfigure(1, weight=1)
         self._toggle_company_fields()
         self._refresh_invoice_sections()
+
+    # pas de switch de thème pour une UI stable
 
     def _toggle_company_fields(self):
         same = self.same_company_var.get()
