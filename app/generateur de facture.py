@@ -10,7 +10,8 @@ from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(BASE_DIR, "factures_sortie")
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "factures_sortie")
 FONT_SIZE = 11
 PAGE_WIDTH, PAGE_HEIGHT = A4
 CURRENCY = "€"
@@ -112,7 +113,7 @@ def generate_items(custom_amounts=None, max_total_ht=None):
         sub_total += total
     return items
 
-def draw_invoice_pdf(filename, company, invoice_no, invoice_date, due_date, items, vat_rate, currency=CURRENCY):
+def draw_invoice_pdf(filename, company, invoice_no, invoice_date, due_date, items, vat_rate, currency=CURRENCY, micro_entrepreneur=False):
     c = canvas.Canvas(filename, pagesize=A4)
     c.setTitle(f"Facture {invoice_no}")
 
@@ -187,14 +188,21 @@ def draw_invoice_pdf(filename, company, invoice_no, invoice_date, due_date, item
     y -= 8 * mm
     c.drawRightString(PAGE_WIDTH - margin_left, y, f"Sous-total: {decimal_round(sub_total):.2f} {currency}")
     y -= 6 * mm
-    vat_amount = decimal_round(sub_total * Decimal(vat_rate) / Decimal(100))
-    c.drawRightString(PAGE_WIDTH - margin_left, y, f"TVA ({vat_rate}%): {vat_amount:.2f} {currency}")
+    vat_rate_decimal = Decimal(vat_rate)
+    vat_amount = decimal_round(sub_total * vat_rate_decimal / Decimal(100))
+    c.drawRightString(PAGE_WIDTH - margin_left, y, f"TVA ({vat_rate_decimal}%): {vat_amount:.2f} {currency}")
     y -= 6 * mm
     total = decimal_round(sub_total + vat_amount)
     c.setFont("Helvetica-Bold", FONT_SIZE)
     c.drawRightString(PAGE_WIDTH - margin_left, y, f"Total TTC: {total:.2f} {currency}")
 
-    y -= 15 * mm
+    y -= 10 * mm
+    if micro_entrepreneur:
+        c.setFont("Helvetica", 9)
+        c.drawString(margin_left, y, "TVA non applicable, art. 293 B du CGI")
+        y -= 10 * mm
+    else:
+        y -= 5 * mm
     c.setFont("Helvetica", 8)
     c.drawString(margin_left, y, "Merci pour votre confiance. Paiement à réception, sauf accord contraire.")
     c.showPage()
@@ -210,6 +218,7 @@ class InvoiceGeneratorApp:
         self.custom_amounts_var = tk.BooleanVar(value=False)
         self.custom_dates_var = tk.BooleanVar(value=False)
         self.vat_var = tk.StringVar(value="20")
+        self.micro_var = tk.BooleanVar(value=False)
         self.prefix_var = tk.StringVar(value="FAC-")
         self.file_prefix_var = tk.StringVar(value="")
         self.max_total_var = tk.StringVar(value=str(DEFAULT_MAX_TOTAL_TTC))
@@ -296,19 +305,21 @@ class InvoiceGeneratorApp:
         ttk.Checkbutton(frame, text="Personnaliser les dates", variable=self.custom_dates_var, command=self._update_section_visibility).grid(row=6, column=0, columnspan=2, sticky="w", **padding)
 
         ttk.Label(frame, text="TVA (%)").grid(row=7, column=0, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.vat_var, width=10).grid(row=7, column=1, sticky="w", **padding)
+        self.vat_entry = ttk.Entry(frame, textvariable=self.vat_var, width=10)
+        self.vat_entry.grid(row=7, column=1, sticky="w", **padding)
+        ttk.Checkbutton(frame, text="Micro-entreprise (TVA non applicable)", variable=self.micro_var, command=self._on_micro_toggle).grid(row=8, column=0, columnspan=2, sticky="w", **padding)
 
-        ttk.Label(frame, text="Préfixe numéro").grid(row=8, column=0, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.prefix_var, width=20).grid(row=8, column=1, sticky="w", **padding)
+        ttk.Label(frame, text="Préfixe numéro").grid(row=9, column=0, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.prefix_var, width=20).grid(row=9, column=1, sticky="w", **padding)
 
-        ttk.Label(frame, text="Préfixe fichier").grid(row=9, column=0, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.file_prefix_var, width=20).grid(row=9, column=1, sticky="w", **padding)
+        ttk.Label(frame, text="Préfixe fichier").grid(row=10, column=0, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.file_prefix_var, width=20).grid(row=10, column=1, sticky="w", **padding)
 
-        ttk.Label(frame, text="Plafond TTC").grid(row=10, column=0, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.max_total_var, width=20).grid(row=10, column=1, sticky="w", **padding)
+        ttk.Label(frame, text="Plafond TTC").grid(row=11, column=0, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.max_total_var, width=20).grid(row=11, column=1, sticky="w", **padding)
 
         sections_frame = ttk.LabelFrame(frame, text="Détails par facture")
-        sections_frame.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+        sections_frame.grid(row=12, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
 
         self.sections_canvas = tk.Canvas(sections_frame, height=260, borderwidth=0, highlightthickness=0)
         try:
@@ -325,9 +336,9 @@ class InvoiceGeneratorApp:
         self.sections_canvas.create_window((0, 0), window=self.invoices_container, anchor="nw")
 
         self.generate_button = ttk.Button(frame, text="Générer", style="Accent.TButton", command=self.generate_invoices)
-        self.generate_button.grid(row=12, column=0, columnspan=2, pady=15)
+        self.generate_button.grid(row=13, column=0, columnspan=2, pady=15)
 
-        ttk.Label(frame, textvariable=self.status_var, foreground="green").grid(row=13, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 10))
+        ttk.Label(frame, textvariable=self.status_var, foreground="green").grid(row=14, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 10))
 
         frame.columnconfigure(1, weight=1)
         self._toggle_company_fields()
@@ -343,6 +354,13 @@ class InvoiceGeneratorApp:
             else:
                 entry.state(["disabled"])
         self._update_section_visibility()
+
+    def _on_micro_toggle(self):
+        if self.micro_var.get():
+            self.vat_var.set("0")
+            self.vat_entry.state(["disabled"])
+        else:
+            self.vat_entry.state(["!disabled"])
 
     def _get_invoice_count(self):
         if self._updating_count:
@@ -490,6 +508,8 @@ class InvoiceGeneratorApp:
         except Exception:
             messagebox.showerror("Erreur", "TVA invalide.", parent=self.root)
             return
+        if self.micro_var.get():
+            vat_rate = Decimal("0")
 
         prefix = self.prefix_var.get().strip() or "FAC-"
         file_prefix = self.file_prefix_var.get().strip()
@@ -598,7 +618,7 @@ class InvoiceGeneratorApp:
                 items = generate_items(max_total_ht=max_total_ht)
 
             filename = os.path.join(OUTPUT_DIR, f"{file_prefix}facture_{inv_no}.pdf")
-            draw_invoice_pdf(filename, company, inv_no, inv_date, due_date, items, vat_rate, CURRENCY)
+            draw_invoice_pdf(filename, company, inv_no, inv_date, due_date, items, vat_rate, CURRENCY, micro_entrepreneur=self.micro_var.get())
             generated_files.append(filename)
 
         self.status_var.set(f"{len(generated_files)} factures générées dans {os.path.abspath(OUTPUT_DIR)}")
