@@ -73,16 +73,21 @@ def generate_items(custom_amounts=None, max_total_ht=None):
     cap_ht = None
     if max_total_ht is not None:
         cap_ht = decimal_round(Decimal(str(max_total_ht)))
+
+    # --- 1) CAS MONTANTS PERSONNALISÉS ---
     if custom_amounts:
         amounts = [decimal_round(Decimal(str(amt))) for amt in custom_amounts]
         total_sum = sum(amounts, Decimal("0.00"))
+
+        # Si dépassement du plafond → réduction proportionnelle
         if cap_ht is not None and total_sum > cap_ht and total_sum > Decimal("0.00"):
             factor = cap_ht / total_sum
             amounts = [decimal_round(a * factor) for a in amounts]
             adjusted_total = sum(amounts, Decimal("0.00"))
             diff = cap_ht - adjusted_total
-            if diff != Decimal("0.00"):
+            if diff != Decimal("0.00") and amounts:
                 amounts[-1] = decimal_round(amounts[-1] + diff)
+
         for amt in amounts:
             if amt <= Decimal("0.00"):
                 continue
@@ -90,27 +95,64 @@ def generate_items(custom_amounts=None, max_total_ht=None):
             qty = 1
             line_total = decimal_round(amt * qty)
             items.append({"desc": desc, "qty": qty, "unit": amt, "total": line_total})
+
         return items
+
+    # --- 2) GÉNÉRATION LIBRE DES LIGNES ---
     count = random.randint(1, 5)
-    sub_total = Decimal("0.00")
     for _ in range(count):
-        remaining = None
-        if cap_ht is not None:
-            remaining = cap_ht - sub_total
-            if remaining <= Decimal("0.00"):
-                break
         desc = random.choice(ITEM_DESCRIPTIONS)
         qty = random.randint(1, 10)
         unit = decimal_round(random.uniform(20.0, 1200.0))
         total = decimal_round(unit * qty)
-        if remaining is not None and total > remaining:
-            total = decimal_round(remaining)
-            qty = 1
-            unit = total
-        if total <= Decimal("0.00"):
-            continue
-        items.append({"desc": desc, "qty": qty, "unit": unit, "total": total})
-        sub_total += total
+        if total > Decimal("0.00"):
+            items.append({"desc": desc, "qty": qty, "unit": unit, "total": total})
+
+    # Si aucune ligne → en créer une petite
+    if not items:
+        unit = decimal_round(random.uniform(50.0, 500.0))
+        items.append({
+            "desc": random.choice(ITEM_DESCRIPTIONS),
+            "qty": 1,
+            "unit": unit,
+            "total": unit
+        })
+
+    # --- 3) AJUSTEMENT ALÉATOIRE AU PLAFOND ---
+    if cap_ht is not None and cap_ht > Decimal("0.00"):
+        sub_total = sum(it["total"] for it in items)
+
+        # ratio aléatoire entre 20 % et 100 % (réglable)
+        ratio = Decimal(str(random.uniform(0.2, 1.0)))
+        target_total = decimal_round(cap_ht * ratio)
+
+        if sub_total > Decimal("0.00"):
+            factor = target_total / sub_total
+
+            new_items = []
+            for it in items:
+                new_total = decimal_round(it["total"] * factor)
+                if new_total <= Decimal("0.00"):
+                    continue
+                qty = it["qty"]
+                new_unit = decimal_round(new_total / qty)
+                new_items.append({
+                    "desc": it["desc"],
+                    "qty": qty,
+                    "unit": new_unit,
+                    "total": new_total
+                })
+
+            if new_items:
+                items = new_items
+            else:
+                items = [{
+                    "desc": random.choice(ITEM_DESCRIPTIONS),
+                    "qty": 1,
+                    "unit": target_total,
+                    "total": target_total
+                }]
+
     return items
 
 def draw_invoice_pdf(filename, company, invoice_no, invoice_date, due_date, items, vat_rate, currency=CURRENCY, micro_entrepreneur=False):
