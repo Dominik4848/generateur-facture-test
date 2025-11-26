@@ -1,8 +1,5 @@
-import os
-import random
-import datetime
+import os, random, datetime, tkinter as tk
 from decimal import Decimal, ROUND_HALF_UP
-import tkinter as tk
 from tkinter import ttk, messagebox
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -16,13 +13,8 @@ FONT_SIZE = 11
 PAGE_WIDTH, PAGE_HEIGHT = A4
 CURRENCY = "€"
 
-# donnees client (même client pour toutes les factures)
 CLIENT_NAME = "test test"
-CLIENT_ADDRESS = [
-    "12 rue Fictive",
-    "75000 Faillotte",
-    "France"
-]
+CLIENT_ADDRESS = ["12 rue Fictive", "75000 Faillotte", "France"]
 
 SAMPLE_COMPANIES = [
     {"name": "SARL Alpha", "address": ["1 Place du Marché", "75001 Paris"], "siret": "123 456 789 00010"},
@@ -38,169 +30,103 @@ SAMPLE_COMPANIES = [
 ]
 
 MAX_INVOICES = len(SAMPLE_COMPANIES)
-# plafond total TTC par facture en dur possible à modifier
 DEFAULT_MAX_TOTAL_TTC = Decimal("5000")
-
-# descriptions d'items possible à modifier
 ITEM_DESCRIPTIONS = [
-    "Consultation",
-    "Développement",
-    "Maintenance",
-    "Licence logicielle",
-    "Prestation horaire",
-    "Frais de voyage",
-    "Formation",
-    "Design graphique"
+    "Consultation", "Développement", "Maintenance", "Licence logicielle",
+    "Prestation horaire", "Frais de voyage", "Formation", "Design graphique"
 ]
 
-def ensure_output_dir():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-def decimal_round(value):
-    return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-def random_date_between(start_date, end_date):
-    delta = end_date - start_date
-    rand_days = random.randint(0, delta.days)
-    return start_date + datetime.timedelta(days=rand_days)
-
+def ensure_output_dir(): os.makedirs(OUTPUT_DIR, exist_ok=True)
+def decimal_round(v): return Decimal(v).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+def random_date_between(start, end):
+    return start + datetime.timedelta(days=random.randint(0, (end - start).days))
 def generate_invoice_number(prefix, idx):
-    date_part = datetime.datetime.now().strftime("%Y%m%d")
-    return f"{prefix}{date_part}-{idx:04d}"
+    return f"{prefix}{datetime.datetime.now().strftime('%Y%m%d')}-{idx:04d}"
 
 def generate_items(custom_amounts=None, max_total_ht=None):
     items = []
-    cap_ht = None
-    if max_total_ht is not None:
-        cap_ht = decimal_round(Decimal(str(max_total_ht)))
+    cap_ht = decimal_round(Decimal(str(max_total_ht))) if max_total_ht is not None else None
 
-    # --- 1) CAS MONTANTS PERSONNALISÉS ---
+    # montants personnalisés
     if custom_amounts:
-        amounts = [decimal_round(Decimal(str(amt))) for amt in custom_amounts]
+        amounts = [decimal_round(Decimal(str(a))) for a in custom_amounts]
         total_sum = sum(amounts, Decimal("0.00"))
-
-        # Si dépassement du plafond → réduction proportionnelle
-        if cap_ht is not None and total_sum > cap_ht and total_sum > Decimal("0.00"):
+        if cap_ht is not None and total_sum > cap_ht and total_sum > 0:
             factor = cap_ht / total_sum
             amounts = [decimal_round(a * factor) for a in amounts]
-            adjusted_total = sum(amounts, Decimal("0.00"))
-            diff = cap_ht - adjusted_total
-            if diff != Decimal("0.00") and amounts:
+            adjusted = sum(amounts, Decimal("0.00"))
+            diff = cap_ht - adjusted
+            if diff != 0 and amounts:
                 amounts[-1] = decimal_round(amounts[-1] + diff)
-
         for amt in amounts:
-            if amt <= Decimal("0.00"):
-                continue
+            if amt <= 0: continue
             desc = random.choice(ITEM_DESCRIPTIONS)
-            qty = 1
-            line_total = decimal_round(amt * qty)
-            items.append({"desc": desc, "qty": qty, "unit": amt, "total": line_total})
-
+            items.append({"desc": desc, "qty": 1, "unit": amt, "total": amt})
         return items
 
-    # --- 2) GÉNÉRATION LIBRE DES LIGNES ---
-    count = random.randint(1, 5)
-    for _ in range(count):
+    # génération libre
+    for _ in range(random.randint(1, 5)):
         desc = random.choice(ITEM_DESCRIPTIONS)
         qty = random.randint(1, 10)
         unit = decimal_round(random.uniform(20.0, 1200.0))
         total = decimal_round(unit * qty)
-        if total > Decimal("0.00"):
+        if total > 0:
             items.append({"desc": desc, "qty": qty, "unit": unit, "total": total})
 
-    # Si aucune ligne → en créer une petite
     if not items:
         unit = decimal_round(random.uniform(50.0, 500.0))
-        items.append({
-            "desc": random.choice(ITEM_DESCRIPTIONS),
-            "qty": 1,
-            "unit": unit,
-            "total": unit
-        })
+        items.append({"desc": random.choice(ITEM_DESCRIPTIONS), "qty": 1, "unit": unit, "total": unit})
 
-    # --- 3) AJUSTEMENT ALÉATOIRE AU PLAFOND ---
-    if cap_ht is not None and cap_ht > Decimal("0.00"):
+    # ajustement aléatoire au plafond
+    if cap_ht is not None and cap_ht > 0:
         sub_total = sum(it["total"] for it in items)
-
-        # ratio aléatoire entre 20 % et 100 % (réglable)
         ratio = Decimal(str(random.uniform(0.2, 1.0)))
         target_total = decimal_round(cap_ht * ratio)
-
-        if sub_total > Decimal("0.00"):
+        if sub_total > 0:
             factor = target_total / sub_total
-
             new_items = []
             for it in items:
                 new_total = decimal_round(it["total"] * factor)
-                if new_total <= Decimal("0.00"):
-                    continue
+                if new_total <= 0: continue
                 qty = it["qty"]
                 new_unit = decimal_round(new_total / qty)
-                new_items.append({
-                    "desc": it["desc"],
-                    "qty": qty,
-                    "unit": new_unit,
-                    "total": new_total
-                })
-
+                new_items.append({"desc": it["desc"], "qty": qty, "unit": new_unit, "total": new_total})
             if new_items:
                 items = new_items
             else:
-                items = [{
-                    "desc": random.choice(ITEM_DESCRIPTIONS),
-                    "qty": 1,
-                    "unit": target_total,
-                    "total": target_total
-                }]
-
+                items = [{"desc": random.choice(ITEM_DESCRIPTIONS), "qty": 1, "unit": target_total, "total": target_total}]
     return items
 
 def draw_invoice_pdf(filename, company, invoice_no, invoice_date, due_date, items, vat_rate, currency=CURRENCY, micro_entrepreneur=False):
-    c = canvas.Canvas(filename, pagesize=A4)
-    c.setTitle(f"Facture {invoice_no}")
+    c = canvas.Canvas(filename, pagesize=A4); c.setTitle(f"Facture {invoice_no}")
+    margin_left, y = 20 * mm, PAGE_HEIGHT - 20 * mm
 
-    margin_left = 20 * mm
-    y = PAGE_HEIGHT - 20 * mm
-
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(margin_left, y, company["name"])
-    c.setFont("Helvetica", FONT_SIZE)
-    y -= 6 * mm
+    c.setFont("Helvetica-Bold", 14); c.drawString(margin_left, y, company["name"])
+    c.setFont("Helvetica", FONT_SIZE); y -= 6 * mm
     for line in company.get("address", []):
-        c.drawString(margin_left, y, line)
-        y -= 5 * mm
+        c.drawString(margin_left, y, line); y -= 5 * mm
     if "siret" in company:
-        c.drawString(margin_left, y, f"SIRET: {company['siret']}")
-        y -= 8 * mm
+        c.drawString(margin_left, y, f"SIRET: {company['siret']}"); y -= 8 * mm
     else:
         y -= 2 * mm
 
     right_x = PAGE_WIDTH - 80 * mm
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(right_x, PAGE_HEIGHT - 30 * mm, f"FACTURE")
+    c.setFont("Helvetica-Bold", 12); c.drawString(right_x, PAGE_HEIGHT - 30 * mm, "FACTURE")
     c.setFont("Helvetica", FONT_SIZE)
     c.drawString(right_x, PAGE_HEIGHT - 36 * mm, f"N°: {invoice_no}")
     c.drawString(right_x, PAGE_HEIGHT - 42 * mm, f"Date: {invoice_date.strftime('%d/%m/%Y')}")
     c.drawString(right_x, PAGE_HEIGHT - 48 * mm, f"Échéance: {due_date.strftime('%d/%m/%Y')}")
 
-    y -= 6 * mm
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(margin_left, y, "Facturé à :")
-    c.setFont("Helvetica", FONT_SIZE)
-    y -= 6 * mm
-    c.drawString(margin_left, y, CLIENT_NAME)
-    y -= 5 * mm
+    y -= 6 * mm; c.setFont("Helvetica-Bold", 11); c.drawString(margin_left, y, "Facturé à :")
+    c.setFont("Helvetica", FONT_SIZE); y -= 6 * mm
+    c.drawString(margin_left, y, CLIENT_NAME); y -= 5 * mm
     for line in CLIENT_ADDRESS:
-        c.drawString(margin_left, y, line)
-        y -= 5 * mm
+        c.drawString(margin_left, y, line); y -= 5 * mm
 
     y -= 8 * mm
     table_x = margin_left
-    qty_col_x = table_x + 100 * mm
-    unit_col_x = table_x + 130 * mm
-    total_col_x = table_x + 170 * mm
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(0.5)
+    qty_col_x, unit_col_x, total_col_x = table_x + 100 * mm, table_x + 130 * mm, table_x + 170 * mm
+    c.setStrokeColor(colors.black); c.setLineWidth(0.5)
     c.rect(table_x - 2, y - 3 * mm, PAGE_WIDTH - 2 * margin_left + 4, 8 * mm, stroke=1, fill=0)
     c.setFont("Helvetica-Bold", FONT_SIZE)
     c.drawString(table_x, y, "Description")
@@ -212,22 +138,17 @@ def draw_invoice_pdf(filename, company, invoice_no, invoice_date, due_date, item
     c.setFont("Helvetica", FONT_SIZE)
     sub_total = Decimal("0.00")
     for it in items:
-        qty = it["qty"]
-        unit = decimal_round(it["unit"])
+        qty, unit = it["qty"], decimal_round(it["unit"])
         line_total = decimal_round(unit * qty)
         c.drawString(table_x, y, it["desc"])
         c.drawRightString(qty_col_x, y, str(qty))
         c.drawRightString(unit_col_x, y, f"{unit:.2f}")
         c.drawRightString(total_col_x, y, f"{line_total:.2f}")
-        sub_total += line_total
-        y -= 6 * mm
+        sub_total += line_total; y -= 6 * mm
         if y < 40 * mm:
-            c.showPage()
-            y = PAGE_HEIGHT - 20 * mm
+            c.showPage(); y = PAGE_HEIGHT - 20 * mm
 
-    y -= 6 * mm
-    c.line(table_x, y, PAGE_WIDTH - margin_left, y)
-    y -= 8 * mm
+    y -= 6 * mm; c.line(table_x, y, PAGE_WIDTH - margin_left, y); y -= 8 * mm
     c.drawRightString(PAGE_WIDTH - margin_left, y, f"Sous-total: {decimal_round(sub_total):.2f} {currency}")
     y -= 6 * mm
     vat_rate_decimal = Decimal(vat_rate)
@@ -240,20 +161,16 @@ def draw_invoice_pdf(filename, company, invoice_no, invoice_date, due_date, item
 
     y -= 10 * mm
     if micro_entrepreneur:
-        c.setFont("Helvetica", 9)
-        c.drawString(margin_left, y, "TVA non applicable, art. 293 B du CGI")
-        y -= 10 * mm
+        c.setFont("Helvetica", 9); c.drawString(margin_left, y, "TVA non applicable, art. 293 B du CGI"); y -= 10 * mm
     else:
         y -= 5 * mm
     c.setFont("Helvetica", 8)
     c.drawString(margin_left, y, "Merci pour votre confiance. Paiement à réception, sauf accord contraire.")
-    c.showPage()
-    c.save()
+    c.showPage(); c.save()
 
 class InvoiceGeneratorApp:
     def __init__(self, root):
-        self.root = root
-        self.root.title("Générateur de factures PDF")
+        self.root = root; self.root.title("Générateur de factures PDF")
         self._setup_theme()
         self.n_var = tk.IntVar(value=1)
         self.same_company_var = tk.BooleanVar(value=True)
@@ -268,28 +185,20 @@ class InvoiceGeneratorApp:
         self.company_address_var = tk.StringVar()
         self.company_siret_var = tk.StringVar()
         self.status_var = tk.StringVar()
-        self.invoice_sections = []
-        self._updating_count = False
+        self.invoice_sections, self._updating_count = [], False
         self._build_ui()
 
     def _setup_theme(self):
         self.style = ttk.Style(self.root)
-        theme_candidates = [
-            os.path.join(BASE_DIR, "Azure-ttk-theme", "azure.tcl"),
-            os.path.join(BASE_DIR, "azure.tcl"),
-        ]
+        theme_candidates = [os.path.join(BASE_DIR, "Azure-ttk-theme", "azure.tcl"),
+                            os.path.join(BASE_DIR, "azure.tcl")]
         azure_active = False
         for theme_path in theme_candidates:
-            if not os.path.exists(theme_path):
-                continue
+            if not os.path.exists(theme_path): continue
             try:
-                norm = theme_path.replace("\\", "/")
-                self.root.tk.call("source", norm)
-                try:
-                    self.root.tk.call("set_theme", "light")
-                except Exception:
-                    # fallback direct si set_theme non dispo
-                    self.root.tk.call("ttk::style", "theme", "use", "azure-light")
+                self.root.tk.call("source", theme_path.replace("\\", "/"))
+                try: self.root.tk.call("set_theme", "light")
+                except Exception: self.root.tk.call("ttk::style", "theme", "use", "azure-light")
                 break
             except Exception:
                 continue
@@ -300,11 +209,9 @@ class InvoiceGeneratorApp:
             azure_active = False
 
         self.style.configure(".", font=("Segoe UI", 10))
-
         if azure_active:
             bg = self.style.lookup(".", "background") or self.style.lookup("TFrame", "background") or "#f0f0f0"
-            self.root.configure(bg=bg)
-            self.bg_color = bg
+            self.root.configure(bg=bg); self.bg_color = bg
         else:
             self.root.configure(bg="#e5e7eb")
             self.style.configure("TFrame", background="#f3f4f6")
@@ -313,23 +220,23 @@ class InvoiceGeneratorApp:
             self.style.configure("TLabelframe", background="#ffffff")
             self.style.configure("TLabelframe.Label", background="#ffffff", font=("Segoe UI", 10, "bold"))
             self.bg_color = "#f3f4f6"
-
         self.style.configure("Accent.TButton", padding=8, font=("Segoe UI", 10, "bold"))
-
 
     def _build_ui(self):
         padding = {"padx": 10, "pady": 5}
-        frame = ttk.Frame(self.root)
-        frame.grid(row=0, column=0, sticky="nsew")
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
+        frame = ttk.Frame(self.root); frame.grid(row=0, column=0, sticky="nsew")
+        self.root.columnconfigure(0, weight=1); self.root.rowconfigure(0, weight=1)
 
         ttk.Label(frame, text="Nombre de factures (max 10)").grid(row=0, column=0, sticky="w", **padding)
-        self.n_spinbox = ttk.Spinbox(frame, from_=1, to=MAX_INVOICES, textvariable=self.n_var, width=6, command=self._refresh_invoice_sections)
+        self.n_spinbox = ttk.Spinbox(frame, from_=1, to=MAX_INVOICES, textvariable=self.n_var, width=6,
+                                     command=self._refresh_invoice_sections)
         self.n_spinbox.grid(row=0, column=1, sticky="w", **padding)
         self.n_var.trace_add("write", lambda *args: self._refresh_invoice_sections())
 
-        ttk.Checkbutton(frame, text="Même société pour toutes (aléatoire si pas remplie ou à remplir individuellement)", variable=self.same_company_var, command=self._toggle_company_fields).grid(row=1, column=0, columnspan=2, sticky="w", **padding)
+        ttk.Checkbutton(frame,
+                        text="Même société pour toutes (aléatoire si pas remplie ou à remplir individuellement)",
+                        variable=self.same_company_var,
+                        command=self._toggle_company_fields).grid(row=1, column=0, columnspan=2, sticky="w", **padding)
 
         ttk.Label(frame, text="Nom société").grid(row=2, column=0, sticky="w", **padding)
         self.company_name_entry = ttk.Entry(frame, textvariable=self.company_name_var, width=40)
@@ -343,13 +250,20 @@ class InvoiceGeneratorApp:
         self.company_siret_entry = ttk.Entry(frame, textvariable=self.company_siret_var, width=40)
         self.company_siret_entry.grid(row=4, column=1, sticky="we", **padding)
 
-        ttk.Checkbutton(frame, text="Personnaliser les montants", variable=self.custom_amounts_var, command=self._update_section_visibility).grid(row=5, column=0, columnspan=2, sticky="w", **padding)
-        ttk.Checkbutton(frame, text="Personnaliser les dates", variable=self.custom_dates_var, command=self._update_section_visibility).grid(row=6, column=0, columnspan=2, sticky="w", **padding)
+        ttk.Checkbutton(frame, text="Personnaliser les montants",
+                        variable=self.custom_amounts_var,
+                        command=self._update_section_visibility).grid(row=5, column=0, columnspan=2, sticky="w", **padding)
+        ttk.Checkbutton(frame, text="Personnaliser les dates",
+                        variable=self.custom_dates_var,
+                        command=self._update_section_visibility).grid(row=6, column=0, columnspan=2, sticky="w", **padding)
 
         ttk.Label(frame, text="TVA (%)").grid(row=7, column=0, sticky="w", **padding)
         self.vat_entry = ttk.Entry(frame, textvariable=self.vat_var, width=10)
         self.vat_entry.grid(row=7, column=1, sticky="w", **padding)
-        ttk.Checkbutton(frame, text="Micro-entreprise (TVA non applicable)", variable=self.micro_var, command=self._on_micro_toggle).grid(row=8, column=0, columnspan=2, sticky="w", **padding)
+
+        ttk.Checkbutton(frame, text="Micro-entreprise (TVA non applicable)",
+                        variable=self.micro_var,
+                        command=self._on_micro_toggle).grid(row=8, column=0, columnspan=2, sticky="w", **padding)
 
         ttk.Label(frame, text="Préfixe numéro").grid(row=9, column=0, sticky="w", **padding)
         ttk.Entry(frame, textvariable=self.prefix_var, width=20).grid(row=9, column=1, sticky="w", **padding)
@@ -364,76 +278,59 @@ class InvoiceGeneratorApp:
         sections_frame.grid(row=12, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
 
         self.sections_canvas = tk.Canvas(sections_frame, height=260, borderwidth=0, highlightthickness=0)
-        try:
-            self.sections_canvas.configure(bg=self.bg_color)
-        except Exception:
-            pass
+        try: self.sections_canvas.configure(bg=self.bg_color)
+        except Exception: pass
         scrollbar = ttk.Scrollbar(sections_frame, orient="vertical", command=self.sections_canvas.yview)
         self.sections_canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        self.sections_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y"); self.sections_canvas.pack(side="left", fill="both", expand=True)
 
         self.invoices_container = ttk.Frame(self.sections_canvas)
-        self.invoices_container.bind("<Configure>", lambda e: self.sections_canvas.configure(scrollregion=self.sections_canvas.bbox("all")))
+        self.invoices_container.bind("<Configure>",
+                                     lambda e: self.sections_canvas.configure(
+                                         scrollregion=self.sections_canvas.bbox("all")))
         self.sections_canvas.create_window((0, 0), window=self.invoices_container, anchor="nw")
 
-        self.generate_button = ttk.Button(frame, text="Générer", style="Accent.TButton", command=self.generate_invoices)
-        self.generate_button.grid(row=13, column=0, columnspan=2, pady=15)
+        ttk.Button(frame, text="Générer", style="Accent.TButton",
+                   command=self.generate_invoices).grid(row=13, column=0, columnspan=2, pady=15)
 
-        ttk.Label(frame, textvariable=self.status_var, foreground="green").grid(row=14, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 10))
+        ttk.Label(frame, textvariable=self.status_var, foreground="green").grid(
+            row=14, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 10))
 
         frame.columnconfigure(1, weight=1)
-        self._toggle_company_fields()
-        self._refresh_invoice_sections()
-
-    # pas de switch de thème pour une UI stable
+        self._toggle_company_fields(); self._refresh_invoice_sections()
 
     def _toggle_company_fields(self):
         same = self.same_company_var.get()
         for entry in (self.company_name_entry, self.company_address_entry, self.company_siret_entry):
-            if same:
-                entry.state(["!disabled"])
-            else:
-                entry.state(["disabled"])
+            entry.state(["!disabled"] if same else ["disabled"])
         self._update_section_visibility()
 
     def _on_micro_toggle(self):
         if self.micro_var.get():
-            self.vat_var.set("0")
-            self.vat_entry.state(["disabled"])
+            self.vat_var.set("0"); self.vat_entry.state(["disabled"])
         else:
             self.vat_entry.state(["!disabled"])
 
     def _get_invoice_count(self):
         if self._updating_count:
-            try:
-                return int(self.n_var.get())
-            except Exception:
-                return 1
-        try:
-            n = int(self.n_var.get())
-        except Exception:
-            n = 1
+            try: return int(self.n_var.get())
+            except Exception: return 1
+        try: n = int(self.n_var.get())
+        except Exception: n = 1
         n = max(1, min(MAX_INVOICES, n))
         if self.n_var.get() != n:
-            self._updating_count = True
-            self.n_var.set(n)
-            self._updating_count = False
+            self._updating_count = True; self.n_var.set(n); self._updating_count = False
         return n
 
     def _create_invoice_section(self, index):
         frame = ttk.LabelFrame(self.invoices_container, text=f"Facture {index}")
         frame.grid(row=index - 1, column=0, sticky="ew", padx=10, pady=6)
         frame.columnconfigure(1, weight=1)
-
         pad = {"padx": 8, "pady": 2}
 
-        company_name_var = tk.StringVar()
-        company_address_var = tk.StringVar()
-        company_siret_var = tk.StringVar()
-        amounts_var = tk.StringVar()
-        inv_date_var = tk.StringVar()
-        due_date_var = tk.StringVar()
+        company_name_var = tk.StringVar(); company_address_var = tk.StringVar()
+        company_siret_var = tk.StringVar(); amounts_var = tk.StringVar()
+        inv_date_var = tk.StringVar(); due_date_var = tk.StringVar()
 
         company_name_label = ttk.Label(frame, text="Nom société")
         company_name_label.grid(row=0, column=0, sticky="w", **pad)
@@ -467,35 +364,24 @@ class InvoiceGeneratorApp:
 
         return {
             "frame": frame,
-            "company_name_var": company_name_var,
-            "company_address_var": company_address_var,
-            "company_siret_var": company_siret_var,
-            "company_name_label": company_name_label,
-            "company_name_entry": company_name_entry,
-            "company_address_label": company_address_label,
-            "company_address_entry": company_address_entry,
-            "company_siret_label": company_siret_label,
-            "company_siret_entry": company_siret_entry,
-            "amounts_label": amounts_label,
-            "amounts_var": amounts_var,
-            "amounts_entry": amounts_entry,
-            "inv_date_label": inv_date_label,
-            "inv_date_var": inv_date_var,
-            "inv_date_entry": inv_date_entry,
-            "due_date_label": due_date_label,
-            "due_date_var": due_date_var,
-            "due_date_entry": due_date_entry,
+            "company_name_var": company_name_var, "company_address_var": company_address_var,
+            "company_siret_var": company_siret_var, "company_name_label": company_name_label,
+            "company_name_entry": company_name_entry, "company_address_label": company_address_label,
+            "company_address_entry": company_address_entry, "company_siret_label": company_siret_label,
+            "company_siret_entry": company_siret_entry, "amounts_label": amounts_label,
+            "amounts_var": amounts_var, "amounts_entry": amounts_entry,
+            "inv_date_label": inv_date_label, "inv_date_var": inv_date_var,
+            "inv_date_entry": inv_date_entry, "due_date_label": due_date_label,
+            "due_date_var": due_date_var, "due_date_entry": due_date_entry,
         }
 
     def _refresh_invoice_sections(self, *args):
         n = self._get_invoice_count()
         while len(self.invoice_sections) > n:
-            section = self.invoice_sections.pop()
-            section["frame"].destroy()
+            section = self.invoice_sections.pop(); section["frame"].destroy()
         while len(self.invoice_sections) < n:
             index = len(self.invoice_sections) + 1
-            section = self._create_invoice_section(index)
-            self.invoice_sections.append(section)
+            self.invoice_sections.append(self._create_invoice_section(index))
         self._update_section_visibility()
 
     def _update_section_visibility(self, *args):
@@ -503,7 +389,6 @@ class InvoiceGeneratorApp:
         custom_amounts = self.custom_amounts_var.get()
         custom_dates = self.custom_dates_var.get()
         for section in self.invoice_sections:
-            # Affichage/masquage des champs société par facture
             if same:
                 section["company_name_label"].grid_remove()
                 section["company_name_entry"].grid_remove()
@@ -518,16 +403,12 @@ class InvoiceGeneratorApp:
                 section["company_address_entry"].grid()
                 section["company_siret_label"].grid()
                 section["company_siret_entry"].grid()
-
-            # Affichage/masquage des montants personnalisés
             if custom_amounts:
                 section["amounts_label"].grid()
                 section["amounts_entry"].grid()
             else:
                 section["amounts_label"].grid_remove()
                 section["amounts_entry"].grid_remove()
-
-            # Affichage/masquage des dates personnalisées
             if custom_dates:
                 section["inv_date_label"].grid()
                 section["inv_date_entry"].grid()
@@ -544,37 +425,30 @@ class InvoiceGeneratorApp:
         if n > MAX_INVOICES:
             messagebox.showinfo("Information", f"Nombre ajusté à {MAX_INVOICES}.", parent=self.root)
             n = MAX_INVOICES
-
         try:
             vat_rate = Decimal(self.vat_var.get().replace(",", "."))
         except Exception:
-            messagebox.showerror("Erreur", "TVA invalide.", parent=self.root)
-            return
-        if self.micro_var.get():
-            vat_rate = Decimal("0")
+            messagebox.showerror("Erreur", "TVA invalide.", parent=self.root); return
+        if self.micro_var.get(): vat_rate = Decimal("0")
 
         prefix = self.prefix_var.get().strip() or "FAC-"
         file_prefix = self.file_prefix_var.get().strip()
-
         try:
             max_total_ttc = decimal_round(Decimal(self.max_total_var.get().replace(",", ".")))
         except Exception:
-            messagebox.showerror("Erreur", "Plafond TTC invalide.", parent=self.root)
-            return
+            messagebox.showerror("Erreur", "Plafond TTC invalide.", parent=self.root); return
 
         vat_multiplier = (Decimal("100") + vat_rate) / Decimal("100") if vat_rate is not None else Decimal("1")
         max_total_ht = decimal_round(max_total_ttc / vat_multiplier) if vat_multiplier != 0 else max_total_ttc
 
         same_company = self.same_company_var.get()
-
         if same_company:
             name = self.company_name_var.get().strip()
             if name:
                 address = self.company_address_var.get().split(";") if self.company_address_var.get() else []
-                comp = {"name": name, "address": [line.strip() for line in address if line.strip()]}
+                comp = {"name": name, "address": [l.strip() for l in address if l.strip()]}
                 siret = self.company_siret_var.get().strip()
-                if siret:
-                    comp["siret"] = siret
+                if siret: comp["siret"] = siret
             else:
                 comp = random.choice(SAMPLE_COMPANIES)
             companies = [dict(comp) for _ in range(n)]
@@ -587,39 +461,29 @@ class InvoiceGeneratorApp:
                 if not name and not addr_raw and not siret:
                     company = random.choice(SAMPLE_COMPANIES)
                 else:
-                    if not name:
-                        name = f"Entreprise {i + 1}"
-                    address = [line.strip() for line in addr_raw.split(";") if line.strip()]
+                    if not name: name = f"Entreprise {i + 1}"
+                    address = [l.strip() for l in addr_raw.split(";") if l.strip()]
                     company = {"name": name, "address": address}
-                    if siret:
-                        company["siret"] = siret
+                    if siret: company["siret"] = siret
                 companies.append(company)
 
         custom_amounts_per_invoice = [None] * n
         if self.custom_amounts_var.get():
             for i, section in enumerate(self.invoice_sections):
                 raw = section["amounts_var"].get()
-                if not raw.strip():
-                    continue
+                if not raw.strip(): continue
                 parts = raw.replace(",", ";").split(";")
                 values = []
-                for part in parts:
-                    part = part.strip()
-                    if not part:
-                        continue
+                for part in (p.strip() for p in parts):
+                    if not part: continue
                     try:
                         num = decimal_round(Decimal(part))
                     except Exception:
-                        messagebox.showerror("Erreur", f"Montant invalide pour la facture {i+1} : {part}", parent=self.root)
-                        return
-                    if num <= Decimal("0"):
-                        continue
-                    values.append(num)
-                if values:
-                    custom_amounts_per_invoice[i] = values
+                        messagebox.showerror("Erreur", f"Montant invalide pour la facture {i+1} : {part}", parent=self.root); return
+                    if num > 0: values.append(num)
+                if values: custom_amounts_per_invoice[i] = values
 
-        invoice_dates = [None] * n
-        due_dates = [None] * n
+        invoice_dates, due_dates = [None] * n, [None] * n
         if self.custom_dates_var.get():
             for i, section in enumerate(self.invoice_sections):
                 inv_raw = section["inv_date_var"].get().strip()
@@ -628,17 +492,14 @@ class InvoiceGeneratorApp:
                     try:
                         invoice_dates[i] = datetime.datetime.strptime(inv_raw, "%d-%m-%Y").date()
                     except Exception:
-                        messagebox.showerror("Erreur", f"Date facture invalide pour la facture {i+1}", parent=self.root)
-                        return
+                        messagebox.showerror("Erreur", f"Date facture invalide pour la facture {i+1}", parent=self.root); return
                 if due_raw:
                     try:
                         due_dates[i] = datetime.datetime.strptime(due_raw, "%d-%m-%Y").date()
                     except Exception:
-                        messagebox.showerror("Erreur", f"Date échéance invalide pour la facture {i+1}", parent=self.root)
-                        return
+                        messagebox.showerror("Erreur", f"Date échéance invalide pour la facture {i+1}", parent=self.root); return
 
         ensure_output_dir()
-
         generated_files = []
         for i in range(1, n + 1):
             company = companies[i - 1]
@@ -647,8 +508,7 @@ class InvoiceGeneratorApp:
                 inv_date = invoice_dates[i - 1]
             else:
                 end = datetime.date.today()
-                start = end - datetime.timedelta(days=90)
-                inv_date = random_date_between(start, end)
+                inv_date = random_date_between(end - datetime.timedelta(days=90), end)
             if due_dates[i - 1]:
                 due_date = due_dates[i - 1]
             else:
@@ -656,22 +516,22 @@ class InvoiceGeneratorApp:
 
             custom_amts = custom_amounts_per_invoice[i - 1]
             items = generate_items(custom_amounts=custom_amts, max_total_ht=max_total_ht)
-            if not items:
-                items = generate_items(max_total_ht=max_total_ht)
+            if not items: items = generate_items(max_total_ht=max_total_ht)
 
             filename = os.path.join(OUTPUT_DIR, f"{file_prefix}facture_{inv_no}.pdf")
-            draw_invoice_pdf(filename, company, inv_no, inv_date, due_date, items, vat_rate, CURRENCY, micro_entrepreneur=self.micro_var.get())
+            draw_invoice_pdf(filename, company, inv_no, inv_date, due_date, items, vat_rate, CURRENCY,
+                             micro_entrepreneur=self.micro_var.get())
             generated_files.append(filename)
 
         self.status_var.set(f"{len(generated_files)} factures générées dans {os.path.abspath(OUTPUT_DIR)}")
-        messagebox.showinfo("Succès", f"{len(generated_files)} factures générées dans\n{os.path.abspath(OUTPUT_DIR)}", parent=self.root)
-
+        messagebox.showinfo("Succès",
+                            f"{len(generated_files)} factures générées dans\n{os.path.abspath(OUTPUT_DIR)}",
+                            parent=self.root)
 
 def main():
     root = tk.Tk()
     InvoiceGeneratorApp(root)
     root.mainloop()
-
 
 if __name__ == "__main__":
     main()
