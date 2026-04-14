@@ -1,172 +1,40 @@
-import os, random, datetime, tkinter as tk
-from decimal import Decimal, ROUND_HALF_UP
+import os
+import random
+import datetime
+import tkinter as tk
+from decimal import Decimal
 from tkinter import ttk, messagebox
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.pdfgen import canvas
-from reportlab.lib import colors
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(BASE_DIR)
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "factures_sortie")
-FONT_SIZE = 11
-PAGE_WIDTH, PAGE_HEIGHT = A4
-CURRENCY = "€"
+from data import (
+    BASE_DIR,
+    MAX_INVOICES,
+    DEFAULT_MAX_TOTAL_TTC,
+    SAMPLE_COMPANIES,
+    SAMPLE_Z_PROFILES,
+    CURRENCY,
+    decimal_round,
+    OUTPUT_DIR,
+    Z_CAISSE_OUTPUT_DIR,
+    RIB_PROVENANCE_LABELS,
+    SAMPLE_BANKS_BY_RIB_PROVENANCE,
+    RIB_OUTPUT_DIR,
+)
+from invoice_pdf import (
+    ensure_output_dir,
+    random_date_between,
+    generate_invoice_number,
+    generate_items,
+    draw_invoice_pdf,
+)
+from z_caisse_pdf import (
+    ensure_z_caisse_output_dir,
+    draw_z_caisse_pdf,
+)
+from rib_pdf import (
+    ensure_rib_output_dir,
+    draw_rib_pdf,
+)
 
-CLIENT_NAME = "test test"
-CLIENT_ADDRESS = ["12 rue Fictive", "75000 Faillotte", "France"]
-
-SAMPLE_COMPANIES = [
-    {"name": "SARL Alpha", "address": ["1 Place du Marché", "75001 Paris"], "siret": "123 456 789 00010"},
-    {"name": "EURL Beta", "address": ["9 Avenue Imaginaire", "69000 Lyon"], "siret": "987 654 321 00020"},
-    {"name": "SAS Gamma", "address": ["5 Boulevard Exemple", "06000 Nice"], "siret": "555 555 555 00030"},
-    {"name": "SARL Delta", "address": ["12 Rue du Port", "33000 Bordeaux"], "siret": "111 222 333 00040"},
-    {"name": "SASU Epsilon", "address": ["18 Chemin des Bois", "31000 Toulouse"], "siret": "222 333 444 00050"},
-    {"name": "SARL Zeta", "address": ["7 Rue des Lilas", "44000 Nantes"], "siret": "333 444 555 00060"},
-    {"name": "SCI Eta", "address": ["3 Impasse des Jardins", "13000 Marseille"], "siret": "444 555 666 00070"},
-    {"name": "SARL Theta", "address": ["21 Avenue des Arts", "67000 Strasbourg"], "siret": "555 666 777 00080"},
-    {"name": "SA Iota", "address": ["8 Boulevard du Centre", "59000 Lille"], "siret": "666 777 888 00090"},
-    {"name": "SARL Kappa", "address": ["15 Rue des Forges", "25000 Besançon"], "siret": "777 888 999 00100"},
-]
-
-MAX_INVOICES = len(SAMPLE_COMPANIES)
-DEFAULT_MAX_TOTAL_TTC = Decimal("5000")
-ITEM_DESCRIPTIONS = [
-    "Consultation", "Développement", "Maintenance", "Licence logicielle",
-    "Prestation horaire", "Frais de voyage", "Formation", "Design graphique"
-]
-
-def ensure_output_dir(): os.makedirs(OUTPUT_DIR, exist_ok=True)
-def decimal_round(v): return Decimal(v).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-def random_date_between(start, end):
-    return start + datetime.timedelta(days=random.randint(0, (end - start).days))
-def generate_invoice_number(prefix, idx):
-    return f"{prefix}{datetime.datetime.now().strftime('%Y%m%d')}-{idx:04d}"
-
-def generate_items(custom_amounts=None, max_total_ht=None):
-    items = []
-    cap_ht = decimal_round(Decimal(str(max_total_ht))) if max_total_ht is not None else None
-
-    # montants personnalisés
-    if custom_amounts:
-        amounts = [decimal_round(Decimal(str(a))) for a in custom_amounts]
-        total_sum = sum(amounts, Decimal("0.00"))
-        if cap_ht is not None and total_sum > cap_ht and total_sum > 0:
-            factor = cap_ht / total_sum
-            amounts = [decimal_round(a * factor) for a in amounts]
-            adjusted = sum(amounts, Decimal("0.00"))
-            diff = cap_ht - adjusted
-            if diff != 0 and amounts:
-                amounts[-1] = decimal_round(amounts[-1] + diff)
-        for amt in amounts:
-            if amt <= 0: continue
-            desc = random.choice(ITEM_DESCRIPTIONS)
-            items.append({"desc": desc, "qty": 1, "unit": amt, "total": amt})
-        return items
-
-    # génération libre
-    for _ in range(random.randint(1, 5)):
-        desc = random.choice(ITEM_DESCRIPTIONS)
-        qty = random.randint(1, 10)
-        unit = decimal_round(random.uniform(20.0, 1200.0))
-        total = decimal_round(unit * qty)
-        if total > 0:
-            items.append({"desc": desc, "qty": qty, "unit": unit, "total": total})
-
-    if not items:
-        unit = decimal_round(random.uniform(50.0, 500.0))
-        items.append({"desc": random.choice(ITEM_DESCRIPTIONS), "qty": 1, "unit": unit, "total": unit})
-
-    # ajustement aléatoire au plafond
-    if cap_ht is not None and cap_ht > 0:
-        sub_total = sum(it["total"] for it in items)
-        ratio = Decimal(str(random.uniform(0.2, 1.0)))
-        target_total = decimal_round(cap_ht * ratio)
-        if sub_total > 0:
-            factor = target_total / sub_total
-            new_items = []
-            for it in items:
-                new_total = decimal_round(it["total"] * factor)
-                if new_total <= 0: continue
-                qty = it["qty"]
-                new_unit = decimal_round(new_total / qty)
-                new_items.append({"desc": it["desc"], "qty": qty, "unit": new_unit, "total": new_total})
-            if new_items:
-                items = new_items
-            else:
-                items = [{"desc": random.choice(ITEM_DESCRIPTIONS), "qty": 1, "unit": target_total, "total": target_total}]
-    return items
-
-def draw_invoice_pdf(filename, company, invoice_no, invoice_date, due_date, items, vat_rate, currency=CURRENCY, micro_entrepreneur=False):
-    c = canvas.Canvas(filename, pagesize=A4); c.setTitle(f"Facture {invoice_no}")
-    margin_left, y = 20 * mm, PAGE_HEIGHT - 20 * mm
-
-    c.setFont("Helvetica-Bold", 14); c.drawString(margin_left, y, company["name"])
-    c.setFont("Helvetica", FONT_SIZE); y -= 6 * mm
-    for line in company.get("address", []):
-        c.drawString(margin_left, y, line); y -= 5 * mm
-    if "siret" in company:
-        c.drawString(margin_left, y, f"SIRET: {company['siret']}"); y -= 8 * mm
-    else:
-        y -= 2 * mm
-
-    right_x = PAGE_WIDTH - 80 * mm
-    c.setFont("Helvetica-Bold", 12); c.drawString(right_x, PAGE_HEIGHT - 30 * mm, "FACTURE")
-    c.setFont("Helvetica", FONT_SIZE)
-    c.drawString(right_x, PAGE_HEIGHT - 36 * mm, f"N°: {invoice_no}")
-    c.drawString(right_x, PAGE_HEIGHT - 42 * mm, f"Date: {invoice_date.strftime('%d/%m/%Y')}")
-    c.drawString(right_x, PAGE_HEIGHT - 48 * mm, f"Échéance: {due_date.strftime('%d/%m/%Y')}")
-
-    y -= 6 * mm; c.setFont("Helvetica-Bold", 11); c.drawString(margin_left, y, "Facturé à :")
-    c.setFont("Helvetica", FONT_SIZE); y -= 6 * mm
-    c.drawString(margin_left, y, CLIENT_NAME); y -= 5 * mm
-    for line in CLIENT_ADDRESS:
-        c.drawString(margin_left, y, line); y -= 5 * mm
-
-    y -= 8 * mm
-    table_x = margin_left
-    qty_col_x, unit_col_x, total_col_x = table_x + 100 * mm, table_x + 130 * mm, table_x + 170 * mm
-    c.setStrokeColor(colors.black); c.setLineWidth(0.5)
-    c.rect(table_x - 2, y - 3 * mm, PAGE_WIDTH - 2 * margin_left + 4, 8 * mm, stroke=1, fill=0)
-    c.setFont("Helvetica-Bold", FONT_SIZE)
-    c.drawString(table_x, y, "Description")
-    c.drawRightString(qty_col_x, y, "Qté")
-    c.drawRightString(unit_col_x, y, "PU")
-    c.drawRightString(total_col_x, y, f"Total ({currency})")
-    y -= 8 * mm
-
-    c.setFont("Helvetica", FONT_SIZE)
-    sub_total = Decimal("0.00")
-    for it in items:
-        qty, unit = it["qty"], decimal_round(it["unit"])
-        line_total = decimal_round(unit * qty)
-        c.drawString(table_x, y, it["desc"])
-        c.drawRightString(qty_col_x, y, str(qty))
-        c.drawRightString(unit_col_x, y, f"{unit:.2f}")
-        c.drawRightString(total_col_x, y, f"{line_total:.2f}")
-        sub_total += line_total; y -= 6 * mm
-        if y < 40 * mm:
-            c.showPage(); y = PAGE_HEIGHT - 20 * mm
-
-    y -= 6 * mm; c.line(table_x, y, PAGE_WIDTH - margin_left, y); y -= 8 * mm
-    c.drawRightString(PAGE_WIDTH - margin_left, y, f"Sous-total: {decimal_round(sub_total):.2f} {currency}")
-    y -= 6 * mm
-    vat_rate_decimal = Decimal(vat_rate)
-    vat_amount = decimal_round(sub_total * vat_rate_decimal / Decimal(100))
-    c.drawRightString(PAGE_WIDTH - margin_left, y, f"TVA ({vat_rate_decimal}%): {vat_amount:.2f} {currency}")
-    y -= 6 * mm
-    total = decimal_round(sub_total + vat_amount)
-    c.setFont("Helvetica-Bold", FONT_SIZE)
-    c.drawRightString(PAGE_WIDTH - margin_left, y, f"Total TTC: {total:.2f} {currency}")
-
-    y -= 10 * mm
-    if micro_entrepreneur:
-        c.setFont("Helvetica", 9); c.drawString(margin_left, y, "TVA non applicable, art. 293 B du CGI"); y -= 10 * mm
-    else:
-        y -= 5 * mm
-    c.setFont("Helvetica", 8)
-    c.drawString(margin_left, y, "Merci pour votre confiance. Paiement à réception, sauf accord contraire.")
-    c.showPage(); c.save()
 
 class InvoiceGeneratorApp:
     def __init__(self, root):
@@ -174,6 +42,7 @@ class InvoiceGeneratorApp:
         self._setup_theme()
         self.n_var = tk.IntVar(value=1)
         self.same_company_var = tk.BooleanVar(value=True)
+        self.show_company_section_var = tk.BooleanVar(value=False)
         self.custom_amounts_var = tk.BooleanVar(value=False)
         self.custom_dates_var = tk.BooleanVar(value=False)
         self.vat_var = tk.StringVar(value="20")
@@ -181,11 +50,33 @@ class InvoiceGeneratorApp:
         self.prefix_var = tk.StringVar(value="FAC-")
         self.file_prefix_var = tk.StringVar(value="")
         self.max_total_var = tk.StringVar(value=str(DEFAULT_MAX_TOTAL_TTC))
+        self.show_advanced_section_var = tk.BooleanVar(value=True)
         self.company_name_var = tk.StringVar()
         self.company_address_var = tk.StringVar()
         self.company_siret_var = tk.StringVar()
         self.status_var = tk.StringVar()
         self.invoice_sections, self._updating_count = [], False
+        self.vente_700_var = tk.BooleanVar(value=True)
+        self.achat_600_var = tk.BooleanVar(value=False)
+        self.z_n_var = tk.IntVar(value=1)
+        self.z_company_var = tk.StringVar()
+        self.z_profile_var = tk.StringVar(value="BOUTIQUE")
+        self.z_date_var = tk.StringVar()
+        self.z_caisse_var = tk.StringVar(value="C001")
+        self.z_numero_var = tk.StringVar()
+        self.z_random_amounts_var = tk.BooleanVar(value=True)
+        self.z_tva_mode_var = tk.StringVar(value="1_rate")
+        self.z_tva1_var = tk.StringVar(value="20")
+        self.z_tva2_var = tk.StringVar(value="10")
+        self.z_ecart_var = tk.BooleanVar(value=False)
+        self.z_ecart_amount_var = tk.StringVar(value="0.00")
+        self.z_paiements_vars = {}
+
+        self.rib_provenance_key_var = tk.StringVar(value="CLIENT")
+        self.rib_bank_var = tk.StringVar()
+        self.rib_iban_var = tk.StringVar()
+        self.rib_bic_var = tk.StringVar()
+        self.rib_spaces_var = tk.BooleanVar(value=True)
         self._build_ui()
 
     def _setup_theme(self):
@@ -224,8 +115,28 @@ class InvoiceGeneratorApp:
 
     def _build_ui(self):
         padding = {"padx": 10, "pady": 5}
-        frame = ttk.Frame(self.root); frame.grid(row=0, column=0, sticky="nsew")
+        main_frame = ttk.Frame(self.root); main_frame.grid(row=0, column=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1); self.root.rowconfigure(0, weight=1)
+
+        notebook = ttk.Notebook(main_frame)
+        notebook.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        main_frame.columnconfigure(0, weight=1); main_frame.rowconfigure(0, weight=1)
+
+        invoice_frame = ttk.Frame(notebook)
+        notebook.add(invoice_frame, text="Facture")
+        self._build_invoice_ui(invoice_frame)
+
+        z_frame = ttk.Frame(notebook)
+        notebook.add(z_frame, text="Z de caisse")
+        self._build_z_caisse_ui(z_frame)
+
+        rib_frame = ttk.Frame(notebook)
+        notebook.add(rib_frame, text="RIB")
+        self._build_rib_ui(rib_frame)
+
+    def _build_invoice_ui(self, frame):
+        padding = {"padx": 10, "pady": 5}
+        frame.columnconfigure(1, weight=1)
 
         ttk.Label(frame, text="Nombre de factures (max 10)").grid(row=0, column=0, sticky="w", **padding)
         self.n_spinbox = ttk.Spinbox(frame, from_=1, to=MAX_INVOICES, textvariable=self.n_var, width=6,
@@ -233,49 +144,88 @@ class InvoiceGeneratorApp:
         self.n_spinbox.grid(row=0, column=1, sticky="w", **padding)
         self.n_var.trace_add("write", lambda *args: self._refresh_invoice_sections())
 
-        ttk.Checkbutton(frame,
-                        text="Même société pour toutes (aléatoire si pas remplie ou à remplir individuellement)",
-                        variable=self.same_company_var,
-                        command=self._toggle_company_fields).grid(row=1, column=0, columnspan=2, sticky="w", **padding)
+        type_frame = ttk.LabelFrame(frame, text="Type d'opération")
+        type_frame.grid(row=1, column=0, columnspan=2, sticky="ew", **padding)
+        ttk.Checkbutton(type_frame, text="Vente (700)", variable=self.vente_700_var).grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        ttk.Checkbutton(type_frame, text="Achat (600)", variable=self.achat_600_var).grid(row=0, column=1, sticky="w", padx=10, pady=5)
 
-        ttk.Label(frame, text="Nom société").grid(row=2, column=0, sticky="w", **padding)
+        ttk.Checkbutton(
+            frame,
+            text="Même société pour toutes (aléatoire si pas remplie ou à remplir individuellement)",
+            variable=self.same_company_var,
+            command=self._toggle_company_fields,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", **padding)
+
+        ttk.Checkbutton(
+            frame,
+            text="Afficher les informations société",
+            variable=self.show_company_section_var,
+            command=self._toggle_company_section_visibility,
+        ).grid(row=3, column=0, columnspan=2, sticky="w", **padding)
+
+        self.company_name_label = ttk.Label(frame, text="Nom société")
+        self.company_name_label.grid(row=4, column=0, sticky="w", **padding)
         self.company_name_entry = ttk.Entry(frame, textvariable=self.company_name_var, width=40)
-        self.company_name_entry.grid(row=2, column=1, sticky="we", **padding)
+        self.company_name_entry.grid(row=4, column=1, sticky="we", **padding)
 
-        ttk.Label(frame, text="Adresse (séparer par ';')").grid(row=3, column=0, sticky="w", **padding)
+        self.company_address_label = ttk.Label(frame, text="Adresse (séparer par ';')")
+        self.company_address_label.grid(row=5, column=0, sticky="w", **padding)
         self.company_address_entry = ttk.Entry(frame, textvariable=self.company_address_var, width=40)
-        self.company_address_entry.grid(row=3, column=1, sticky="we", **padding)
+        self.company_address_entry.grid(row=5, column=1, sticky="we", **padding)
 
-        ttk.Label(frame, text="SIRET").grid(row=4, column=0, sticky="w", **padding)
+        self.company_siret_label = ttk.Label(frame, text="SIRET")
+        self.company_siret_label.grid(row=6, column=0, sticky="w", **padding)
         self.company_siret_entry = ttk.Entry(frame, textvariable=self.company_siret_var, width=40)
-        self.company_siret_entry.grid(row=4, column=1, sticky="we", **padding)
+        self.company_siret_entry.grid(row=6, column=1, sticky="we", **padding)
 
-        ttk.Checkbutton(frame, text="Personnaliser les montants",
-                        variable=self.custom_amounts_var,
-                        command=self._update_section_visibility).grid(row=5, column=0, columnspan=2, sticky="w", **padding)
-        ttk.Checkbutton(frame, text="Personnaliser les dates",
-                        variable=self.custom_dates_var,
-                        command=self._update_section_visibility).grid(row=6, column=0, columnspan=2, sticky="w", **padding)
+        ttk.Checkbutton(
+            frame,
+            text="Personnaliser les montants",
+            variable=self.custom_amounts_var,
+            command=self._update_section_visibility,
+        ).grid(row=7, column=0, columnspan=2, sticky="w", **padding)
+        ttk.Checkbutton(
+            frame,
+            text="Personnaliser les dates",
+            variable=self.custom_dates_var,
+            command=self._update_section_visibility,
+        ).grid(row=8, column=0, columnspan=2, sticky="w", **padding)
 
-        ttk.Label(frame, text="TVA (%)").grid(row=7, column=0, sticky="w", **padding)
+        ttk.Label(frame, text="TVA (%)").grid(row=9, column=0, sticky="w", **padding)
         self.vat_entry = ttk.Entry(frame, textvariable=self.vat_var, width=10)
-        self.vat_entry.grid(row=7, column=1, sticky="w", **padding)
+        self.vat_entry.grid(row=9, column=1, sticky="w", **padding)
 
-        ttk.Checkbutton(frame, text="Micro-entreprise (TVA non applicable)",
-                        variable=self.micro_var,
-                        command=self._on_micro_toggle).grid(row=8, column=0, columnspan=2, sticky="w", **padding)
+        ttk.Checkbutton(
+            frame,
+            text="Micro-entreprise (TVA non applicable)",
+            variable=self.micro_var,
+            command=self._on_micro_toggle,
+        ).grid(row=10, column=0, columnspan=2, sticky="w", **padding)
 
-        ttk.Label(frame, text="Préfixe numéro").grid(row=9, column=0, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.prefix_var, width=20).grid(row=9, column=1, sticky="w", **padding)
+        ttk.Checkbutton(
+            frame,
+            text="Afficher préfixes et plafond",
+            variable=self.show_advanced_section_var,
+            command=self._toggle_advanced_section_visibility,
+        ).grid(row=11, column=0, columnspan=2, sticky="w", **padding)
 
-        ttk.Label(frame, text="Préfixe fichier").grid(row=10, column=0, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.file_prefix_var, width=20).grid(row=10, column=1, sticky="w", **padding)
+        self.prefix_label = ttk.Label(frame, text="Préfixe numéro")
+        self.prefix_label.grid(row=12, column=0, sticky="w", **padding)
+        self.prefix_entry = ttk.Entry(frame, textvariable=self.prefix_var, width=20)
+        self.prefix_entry.grid(row=12, column=1, sticky="w", **padding)
 
-        ttk.Label(frame, text="Plafond TTC").grid(row=11, column=0, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.max_total_var, width=20).grid(row=11, column=1, sticky="w", **padding)
+        self.file_prefix_label = ttk.Label(frame, text="Préfixe fichier")
+        self.file_prefix_label.grid(row=13, column=0, sticky="w", **padding)
+        self.file_prefix_entry = ttk.Entry(frame, textvariable=self.file_prefix_var, width=20)
+        self.file_prefix_entry.grid(row=13, column=1, sticky="w", **padding)
+
+        self.max_total_label = ttk.Label(frame, text="Plafond TTC")
+        self.max_total_label.grid(row=14, column=0, sticky="w", **padding)
+        self.max_total_entry = ttk.Entry(frame, textvariable=self.max_total_var, width=20)
+        self.max_total_entry.grid(row=14, column=1, sticky="w", **padding)
 
         sections_frame = ttk.LabelFrame(frame, text="Détails par facture")
-        sections_frame.grid(row=12, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+        sections_frame.grid(row=15, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
 
         self.sections_canvas = tk.Canvas(sections_frame, height=260, borderwidth=0, highlightthickness=0)
         try: self.sections_canvas.configure(bg=self.bg_color)
@@ -291,19 +241,303 @@ class InvoiceGeneratorApp:
         self.sections_canvas.create_window((0, 0), window=self.invoices_container, anchor="nw")
 
         ttk.Button(frame, text="Générer", style="Accent.TButton",
-                   command=self.generate_invoices).grid(row=13, column=0, columnspan=2, pady=15)
+                   command=self.generate_invoices).grid(row=16, column=0, columnspan=2, pady=15)
+
+        ttk.Label(frame, textvariable=self.status_var, foreground="green").grid(
+            row=17, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 10))
+
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(15, weight=1)
+        self._toggle_company_fields()
+        self._toggle_company_section_visibility()
+        self._toggle_advanced_section_visibility()
+        self._refresh_invoice_sections()
+
+    def _build_z_caisse_ui(self, frame):
+        padding = {"padx": 10, "pady": 5}
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="Nombre de Z à générer (1-10)").grid(row=0, column=0, sticky="w", **padding)
+        ttk.Spinbox(frame, from_=1, to=10, textvariable=self.z_n_var, width=6).grid(row=0, column=1, sticky="w", **padding)
+
+        ttk.Label(frame, text="Établissement").grid(row=1, column=0, sticky="w", **padding)
+        company_names = [c["name"] for c in SAMPLE_COMPANIES]
+        self.z_company_combo = ttk.Combobox(frame, textvariable=self.z_company_var, values=company_names, width=37, state="readonly")
+        self.z_company_combo.grid(row=1, column=1, sticky="w", **padding)
+        if company_names:
+            self.z_company_var.set(random.choice(company_names))
+
+        ttk.Label(frame, text="Profil").grid(row=2, column=0, sticky="w", **padding)
+        profile_combo = ttk.Combobox(frame, textvariable=self.z_profile_var, values=list(SAMPLE_Z_PROFILES.keys()), width=37, state="readonly")
+        profile_combo.grid(row=2, column=1, sticky="w", **padding)
+        profile_combo.bind("<<ComboboxSelected>>", lambda e: self._update_z_profile_fields())
+
+        ttk.Label(frame, text="Date de clôture (JJ-MM-AAAA)").grid(row=3, column=0, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.z_date_var, width=20).grid(row=3, column=1, sticky="w", **padding)
+
+        ttk.Label(frame, text="Numéro de caisse").grid(row=4, column=0, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.z_caisse_var, width=20).grid(row=4, column=1, sticky="w", **padding)
+
+        ttk.Label(frame, text="Numéro de Z (préfixe)").grid(row=5, column=0, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.z_numero_var, width=20).grid(row=5, column=1, sticky="w", **padding)
+
+        ttk.Checkbutton(frame, text="Montants aléatoires",
+                        variable=self.z_random_amounts_var,
+                        command=self._update_z_paiements_visibility).grid(row=6, column=0, columnspan=2, sticky="w", **padding)
+
+        tva_frame = ttk.LabelFrame(frame, text="TVA")
+        tva_frame.grid(row=7, column=0, columnspan=2, sticky="ew", **padding)
+        ttk.Radiobutton(tva_frame, text="TVA normale (1 taux)", variable=self.z_tva_mode_var, value="1_rate",
+                        command=self._update_z_tva_fields_visibility).grid(row=0, column=0, sticky="w", padx=10, pady=3)
+        ttk.Radiobutton(tva_frame, text="TVA normale (2 taux)", variable=self.z_tva_mode_var, value="2_rates",
+                        command=self._update_z_tva_fields_visibility).grid(row=0, column=1, sticky="w", padx=10, pady=3)
+        ttk.Radiobutton(tva_frame, text="Sans TVA (0%)", variable=self.z_tva_mode_var, value="no_vat",
+                        command=self._update_z_tva_fields_visibility).grid(row=0, column=2, sticky="w", padx=10, pady=3)
+
+        self.z_tva1_label = ttk.Label(frame, text="TVA 1 (%)")
+        self.z_tva1_label.grid(row=8, column=0, sticky="w", **padding)
+        self.z_tva1_entry = ttk.Entry(frame, textvariable=self.z_tva1_var, width=10)
+        self.z_tva1_entry.grid(row=8, column=1, sticky="w", **padding)
+
+        self.z_tva2_label = ttk.Label(frame, text="TVA 2 (%)")
+        self.z_tva2_label.grid(row=9, column=0, sticky="w", **padding)
+        self.z_tva2_entry = ttk.Entry(frame, textvariable=self.z_tva2_var, width=10)
+        self.z_tva2_entry.grid(row=9, column=1, sticky="w", **padding)
+
+        ttk.Checkbutton(frame, text="Écart de caisse (mode test)",
+                        variable=self.z_ecart_var).grid(row=10, column=0, columnspan=2, sticky="w", **padding)
+
+        ttk.Label(frame, text="Montant écart").grid(row=11, column=0, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.z_ecart_amount_var, width=20).grid(row=11, column=1, sticky="w", **padding)
+
+        paiements_frame = ttk.LabelFrame(frame, text="Modes de paiement")
+        paiements_frame.grid(row=12, column=0, columnspan=2, sticky="ew", **padding)
+        self.z_paiements_container = paiements_frame
+
+        ttk.Button(frame, text="Générer Z de caisse", style="Accent.TButton",
+                   command=self.generate_z_caisse).grid(row=13, column=0, columnspan=2, pady=15)
 
         ttk.Label(frame, textvariable=self.status_var, foreground="green").grid(
             row=14, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 10))
 
+        self._update_z_profile_fields()
+        self._update_z_tva_fields_visibility()
+
+    def _build_rib_ui(self, frame):
+        padding = {"padx": 10, "pady": 5}
         frame.columnconfigure(1, weight=1)
-        self._toggle_company_fields(); self._refresh_invoice_sections()
+
+        ttk.Label(frame, text="Provenance").grid(row=0, column=0, sticky="w", **padding)
+        prov_values = list(RIB_PROVENANCE_LABELS.keys())
+        self.rib_prov_combo = ttk.Combobox(
+            frame,
+            textvariable=self.rib_provenance_key_var,
+            values=prov_values,
+            width=18,
+            state="readonly",
+        )
+        self.rib_prov_combo.grid(row=0, column=1, sticky="w", **padding)
+        self.rib_prov_combo.bind("<<ComboboxSelected>>", lambda e: self._update_rib_bank_choices())
+
+        ttk.Label(frame, text="Banque").grid(row=1, column=0, sticky="w", **padding)
+        self.rib_bank_combo = ttk.Combobox(frame, textvariable=self.rib_bank_var, values=[], width=35, state="readonly")
+        self.rib_bank_combo.grid(row=1, column=1, sticky="w", **padding)
+
+        ttk.Checkbutton(frame, text="Afficher avec espaces", variable=self.rib_spaces_var, command=self._refresh_rib_display).grid(
+            row=2, column=0, columnspan=2, sticky="w", **padding
+        )
+
+        ttk.Button(frame, text="Générer un RIB", style="Accent.TButton", command=self.generate_rib).grid(
+            row=3, column=0, columnspan=2, pady=(10, 5)
+        )
+
+        ttk.Label(frame, text="IBAN").grid(row=4, column=0, sticky="w", **padding)
+        self.rib_iban_entry = ttk.Entry(frame, textvariable=self.rib_iban_var, width=44, state="readonly")
+        self.rib_iban_entry.grid(row=4, column=1, sticky="w", **padding)
+        ttk.Button(frame, text="Copier", command=lambda: self._copy_to_clipboard(self.rib_iban_var.get())).grid(
+            row=4, column=2, sticky="w", padx=(0, 10), pady=5
+        )
+
+        ttk.Label(frame, text="BIC / SWIFT").grid(row=5, column=0, sticky="w", **padding)
+        self.rib_bic_entry = ttk.Entry(frame, textvariable=self.rib_bic_var, width=44, state="readonly")
+        self.rib_bic_entry.grid(row=5, column=1, sticky="w", **padding)
+        ttk.Button(frame, text="Copier", command=lambda: self._copy_to_clipboard(self.rib_bic_var.get())).grid(
+            row=5, column=2, sticky="w", padx=(0, 10), pady=5
+        )
+
+        ttk.Button(frame, text="Générer le PDF", style="Accent.TButton", command=self.generate_rib_pdf).grid(
+            row=6, column=0, columnspan=2, pady=(15, 5)
+        )
+
+        self._update_rib_bank_choices()
+        self.generate_rib()
+
+    def _update_rib_bank_choices(self):
+        prov = self.rib_provenance_key_var.get() or "CLIENT"
+        banks = SAMPLE_BANKS_BY_RIB_PROVENANCE.get(prov, [])
+        names = [b.get("name", "") for b in banks if b.get("name")]
+        self.rib_bank_combo["values"] = names
+        if names:
+            if self.rib_bank_var.get() not in names:
+                self.rib_bank_var.set(names[0])
+
+    def _copy_to_clipboard(self, text):
+        if not text:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+
+    def _iban_compact(self, iban):
+        return "".join(ch for ch in (iban or "") if ch.isalnum()).upper()
+
+    def _iban_format(self, iban):
+        compact = self._iban_compact(iban)
+        return " ".join(compact[i:i + 4] for i in range(0, len(compact), 4))
+
+    def _iban_checksum(self, iban):
+        compact = self._iban_compact(iban)
+        rearranged = compact[4:] + compact[:4]
+        digits = ""
+        for ch in rearranged:
+            if ch.isdigit():
+                digits += ch
+            else:
+                digits += str(ord(ch) - 55)
+        return int(digits) % 97
+
+    def _make_fr_iban(self):
+        bank_code = "".join(str(random.randint(0, 9)) for _ in range(5))
+        branch_code = "".join(str(random.randint(0, 9)) for _ in range(5))
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        account = "".join(random.choice(alphabet) for _ in range(11))
+        rib_key = "".join(str(random.randint(0, 9)) for _ in range(2))
+        bban = bank_code + branch_code + account + rib_key
+        iban_wo_check = f"FR00{bban}"
+        check = 98 - self._iban_checksum(iban_wo_check)
+        return f"FR{check:02d}{bban}"
+
+    def generate_rib(self):
+        prov = self.rib_provenance_key_var.get() or "CLIENT"
+        banks = SAMPLE_BANKS_BY_RIB_PROVENANCE.get(prov, [])
+        bank = next((b for b in banks if b.get("name") == self.rib_bank_var.get()), None) or (banks[0] if banks else None)
+        bic = (bank or {}).get("bic", "BNPAFRPPXXX")
+        iban = self._make_fr_iban()
+        self.rib_bic_var.set(bic)
+        if self.rib_spaces_var.get():
+            self.rib_iban_var.set(self._iban_format(iban))
+        else:
+            self.rib_iban_var.set(self._iban_compact(iban))
+
+    def _refresh_rib_display(self):
+        iban = self.rib_iban_var.get()
+        if not iban:
+            return
+        compact = self._iban_compact(iban)
+        if self.rib_spaces_var.get():
+            self.rib_iban_var.set(self._iban_format(compact))
+        else:
+            self.rib_iban_var.set(compact)
+
+    def generate_rib_pdf(self):
+        prov = self.rib_provenance_key_var.get() or "CLIENT"
+        prov_label = RIB_PROVENANCE_LABELS.get(prov, prov)
+        bank_name = self.rib_bank_var.get() or "Banque"
+        iban = self.rib_iban_var.get()
+        bic = self.rib_bic_var.get()
+        if not iban or not bic:
+            self.generate_rib()
+            iban = self.rib_iban_var.get()
+            bic = self.rib_bic_var.get()
+
+        ensure_rib_output_dir()
+        safe_bank = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in bank_name).strip() or "banque"
+        filename = os.path.join(RIB_OUTPUT_DIR, f"RIB_{safe_bank}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+        draw_rib_pdf(filename, prov_label, bank_name, iban, bic)
+        self.status_var.set(f"RIB généré dans {os.path.abspath(RIB_OUTPUT_DIR)}")
+        messagebox.showinfo("Succès", f"RIB PDF généré dans\n{os.path.abspath(os.path.dirname(filename))}", parent=self.root)
+
+    def _update_z_profile_fields(self):
+        profile = self.z_profile_var.get()
+        if not profile or profile not in SAMPLE_Z_PROFILES:
+            return
+        profile_data = SAMPLE_Z_PROFILES[profile]
+        if self.z_tva_mode_var.get() != "no_vat":
+            self.z_tva1_var.set(str(profile_data["tva_rates"][0]))
+            if len(profile_data["tva_rates"]) > 1:
+                self.z_tva2_var.set(str(profile_data["tva_rates"][1]))
+        self._update_z_paiements_visibility()
+
+    def _update_z_paiements_visibility(self):
+        for widget in self.z_paiements_container.winfo_children():
+            widget.destroy()
+        if self.z_random_amounts_var.get():
+            return
+        profile = self.z_profile_var.get()
+        if not profile or profile not in SAMPLE_Z_PROFILES:
+            return
+        paiements = SAMPLE_Z_PROFILES[profile]["paiements"]
+        pad = {"padx": 5, "pady": 2}
+        for i, paiement in enumerate(paiements):
+            ttk.Label(self.z_paiements_container, text=f"{paiement}:").grid(row=i, column=0, sticky="w", **pad)
+            var = tk.StringVar(value="0.00")
+            self.z_paiements_vars[paiement] = var
+            ttk.Entry(self.z_paiements_container, textvariable=var, width=15).grid(row=i, column=1, sticky="w", **pad)
+
+    def _update_z_tva_fields_visibility(self):
+        mode = self.z_tva_mode_var.get()
+        if mode == "no_vat":
+            self.z_tva1_label.grid_remove()
+            self.z_tva1_entry.grid_remove()
+            self.z_tva2_label.grid_remove()
+            self.z_tva2_entry.grid_remove()
+        elif mode == "2_rates":
+            self.z_tva1_label.grid()
+            self.z_tva1_entry.grid()
+            self.z_tva2_label.grid()
+            self.z_tva2_entry.grid()
+        else:
+            self.z_tva1_label.grid()
+            self.z_tva1_entry.grid()
+            self.z_tva2_label.grid_remove()
+            self.z_tva2_entry.grid_remove()
 
     def _toggle_company_fields(self):
         same = self.same_company_var.get()
         for entry in (self.company_name_entry, self.company_address_entry, self.company_siret_entry):
             entry.state(["!disabled"] if same else ["disabled"])
         self._update_section_visibility()
+
+    def _toggle_company_section_visibility(self):
+        visible = self.show_company_section_var.get()
+        widgets = (
+            self.company_name_label,
+            self.company_name_entry,
+            self.company_address_label,
+            self.company_address_entry,
+            self.company_siret_label,
+            self.company_siret_entry,
+        )
+        for w in widgets:
+            if visible:
+                w.grid()
+            else:
+                w.grid_remove()
+
+    def _toggle_advanced_section_visibility(self):
+        visible = self.show_advanced_section_var.get()
+        widgets = (
+            self.prefix_label,
+            self.prefix_entry,
+            self.file_prefix_label,
+            self.file_prefix_entry,
+            self.max_total_label,
+            self.max_total_entry,
+        )
+        for w in widgets:
+            if visible:
+                w.grid()
+            else:
+                w.grid_remove()
 
     def _on_micro_toggle(self):
         if self.micro_var.get():
@@ -421,6 +655,12 @@ class InvoiceGeneratorApp:
                 section["due_date_entry"].grid_remove()
 
     def generate_invoices(self):
+        vente = self.vente_700_var.get()
+        achat = self.achat_600_var.get()
+        if not vente and not achat:
+            messagebox.showerror("Erreur", "Veuillez sélectionner au moins un type d'opération (Vente ou Achat).", parent=self.root)
+            return
+
         n = self._get_invoice_count()
         if n > MAX_INVOICES:
             messagebox.showinfo("Information", f"Nombre ajusté à {MAX_INVOICES}.", parent=self.root)
@@ -501,31 +741,205 @@ class InvoiceGeneratorApp:
 
         ensure_output_dir()
         generated_files = []
-        for i in range(1, n + 1):
-            company = companies[i - 1]
-            inv_no = generate_invoice_number(prefix, i)
-            if invoice_dates[i - 1]:
-                inv_date = invoice_dates[i - 1]
-            else:
-                end = datetime.date.today()
-                inv_date = random_date_between(end - datetime.timedelta(days=90), end)
-            if due_dates[i - 1]:
-                due_date = due_dates[i - 1]
-            else:
-                due_date = inv_date + datetime.timedelta(days=30)
+        account_types = []
+        if vente: account_types.append("700")
+        if achat: account_types.append("600")
 
-            custom_amts = custom_amounts_per_invoice[i - 1]
-            items = generate_items(custom_amounts=custom_amts, max_total_ht=max_total_ht)
-            if not items: items = generate_items(max_total_ht=max_total_ht)
+        for account_type in account_types:
+            for i in range(1, n + 1):
+                company = companies[i - 1]
+                inv_no = generate_invoice_number(prefix, i)
+                if invoice_dates[i - 1]:
+                    inv_date = invoice_dates[i - 1]
+                else:
+                    end = datetime.date.today()
+                    inv_date = random_date_between(end - datetime.timedelta(days=90), end)
+                if due_dates[i - 1]:
+                    due_date = due_dates[i - 1]
+                else:
+                    due_date = inv_date + datetime.timedelta(days=30)
 
-            filename = os.path.join(OUTPUT_DIR, f"{file_prefix}facture_{inv_no}.pdf")
-            draw_invoice_pdf(filename, company, inv_no, inv_date, due_date, items, vat_rate, CURRENCY,
-                             micro_entrepreneur=self.micro_var.get())
-            generated_files.append(filename)
+                custom_amts = custom_amounts_per_invoice[i - 1]
+                items = generate_items(custom_amounts=custom_amts, max_total_ht=max_total_ht, account_type=account_type)
+                if not items: items = generate_items(max_total_ht=max_total_ht, account_type=account_type)
+
+                suffix = "_VENTE" if account_type == "700" else "_ACHAT"
+                filename = os.path.join(OUTPUT_DIR, f"{file_prefix}facture_{inv_no}{suffix}.pdf")
+                draw_invoice_pdf(filename, company, inv_no, inv_date, due_date, items, vat_rate, CURRENCY,
+                                 micro_entrepreneur=self.micro_var.get(), account_type=account_type)
+                generated_files.append(filename)
 
         self.status_var.set(f"{len(generated_files)} factures générées dans {os.path.abspath(OUTPUT_DIR)}")
         messagebox.showinfo("Succès",
                             f"{len(generated_files)} factures générées dans\n{os.path.abspath(OUTPUT_DIR)}",
+                            parent=self.root)
+
+    def generate_z_caisse(self):
+        n = self.z_n_var.get()
+        if n < 1 or n > 10:
+            messagebox.showerror("Erreur", "Nombre de Z invalide (1-10).", parent=self.root)
+            return
+
+        company_name = self.z_company_var.get()
+        if not company_name:
+            messagebox.showerror("Erreur", "Veuillez sélectionner un établissement.", parent=self.root)
+            return
+
+        company = next((c for c in SAMPLE_COMPANIES if c["name"] == company_name), None)
+        if not company:
+            company = random.choice(SAMPLE_COMPANIES)
+
+        profile = self.z_profile_var.get()
+        if not profile or profile not in SAMPLE_Z_PROFILES:
+            messagebox.showerror("Erreur", "Profil invalide.", parent=self.root)
+            return
+
+        profile_data = SAMPLE_Z_PROFILES[profile]
+        categories = profile_data["categories"]
+        paiements = profile_data["paiements"]
+
+        tva_mode = self.z_tva_mode_var.get()
+        if tva_mode == "no_vat":
+            tva1_rate = Decimal("0")
+            tva2_rate = None
+        else:
+            try:
+                tva1_rate = Decimal(self.z_tva1_var.get().replace(",", "."))
+                tva2_rate = Decimal(self.z_tva2_var.get().replace(",", ".")) if tva_mode == "2_rates" else None
+            except Exception:
+                messagebox.showerror("Erreur", "Taux TVA invalide.", parent=self.root)
+                return
+
+        z_caisse = self.z_caisse_var.get().strip() or "C001"
+        z_prefix = self.z_numero_var.get().strip() or "Z-"
+
+        try:
+            ecart = decimal_round(Decimal(self.z_ecart_amount_var.get().replace(",", "."))) if self.z_ecart_var.get() else None
+        except Exception:
+            ecart = None
+
+        ensure_z_caisse_output_dir()
+        generated_files = []
+
+        for i in range(1, n + 1):
+            z_date_str = self.z_date_var.get().strip()
+            if z_date_str:
+                try:
+                    z_date = datetime.datetime.strptime(z_date_str, "%d-%m-%Y")
+                except Exception:
+                    messagebox.showerror("Erreur", f"Date invalide pour Z {i}: {z_date_str}", parent=self.root)
+                    return
+            else:
+                end = datetime.datetime.now()
+                z_date = end - datetime.timedelta(days=random.randint(0, 90))
+
+            z_numero = f"{z_prefix}{z_date.strftime('%Y%m%d')}-{i:04d}"
+
+            if self.z_random_amounts_var.get():
+                total_ttc = decimal_round(Decimal(random.uniform(500.0, 5000.0)))
+                categories_data = {}
+                remaining = total_ttc
+                for j, cat in enumerate(categories):
+                    if j == len(categories) - 1:
+                        categories_data[cat] = remaining
+                    else:
+                        ratio = Decimal(random.uniform(0.1, 0.4))
+                        amount = decimal_round(total_ttc * ratio)
+                        categories_data[cat] = amount
+                        remaining -= amount
+                if remaining < 0:
+                    categories_data[categories[-1]] = total_ttc - sum(categories_data.values()) + remaining
+
+                paiements_data = {}
+                remaining = total_ttc
+                for j, paiement in enumerate(paiements):
+                    if j == len(paiements) - 1:
+                        paiements_data[paiement] = remaining
+                    else:
+                        ratio = Decimal(random.uniform(0.2, 0.6))
+                        amount = decimal_round(total_ttc * ratio)
+                        paiements_data[paiement] = amount
+                        remaining -= amount
+                if remaining < 0:
+                    paiements_data[paiements[-1]] = total_ttc - sum(paiements_data.values()) + remaining
+            else:
+                categories_data = {}
+                for cat in categories:
+                    categories_data[cat] = Decimal("0.00")
+                paiements_data = {}
+                total_ttc = Decimal("0.00")
+                for paiement in paiements:
+                    var = self.z_paiements_vars.get(paiement)
+                    if var:
+                        try:
+                            amount = decimal_round(Decimal(var.get().replace(",", ".")))
+                            paiements_data[paiement] = amount
+                            total_ttc += amount
+                        except Exception:
+                            paiements_data[paiement] = Decimal("0.00")
+                    else:
+                        paiements_data[paiement] = Decimal("0.00")
+
+                if total_ttc > 0:
+                    for j, cat in enumerate(categories):
+                        ratio = Decimal("1.0") / Decimal(len(categories))
+                        categories_data[cat] = decimal_round(total_ttc * ratio)
+                else:
+                    for cat in categories:
+                        categories_data[cat] = Decimal("0.00")
+
+            if tva_mode == "no_vat":
+                total_ht = total_ttc
+                tva1 = Decimal("0.00")
+                totals = {
+                    "ht": total_ht,
+                    "tva1": tva1,
+                    "tva1_rate": Decimal("0"),
+                    "ttc": total_ttc,
+                    "no_vat": True
+                }
+            elif tva2_rate is not None:
+                ratio_tva1 = Decimal("0.7")
+                ratio_tva2 = Decimal("0.3")
+                base_ht_tva1 = decimal_round(total_ttc / (Decimal("1") + tva1_rate / Decimal("100")) * ratio_tva1)
+                base_ht_tva2 = decimal_round(total_ttc / (Decimal("1") + tva2_rate / Decimal("100")) * ratio_tva2)
+                tva1 = decimal_round(base_ht_tva1 * tva1_rate / Decimal("100"))
+                tva2 = decimal_round(base_ht_tva2 * tva2_rate / Decimal("100"))
+                total_ht = base_ht_tva1 + base_ht_tva2
+                total_ttc_recalc = decimal_round(total_ht + tva1 + tva2)
+                diff = total_ttc - total_ttc_recalc
+                if diff != 0:
+                    tva1 = decimal_round(tva1 + diff / Decimal("2"))
+                    tva2 = decimal_round(tva2 + diff / Decimal("2"))
+                    total_ht = decimal_round(total_ttc - tva1 - tva2)
+                totals = {
+                    "ht": total_ht,
+                    "tva1": tva1,
+                    "tva1_rate": tva1_rate,
+                    "tva2": tva2,
+                    "tva2_rate": tva2_rate,
+                    "ttc": total_ttc,
+                    "no_vat": False
+                }
+            else:
+                total_ht = decimal_round(total_ttc / (Decimal("1") + tva1_rate / Decimal("100")))
+                tva1 = decimal_round(total_ttc - total_ht)
+                totals = {
+                    "ht": total_ht,
+                    "tva1": tva1,
+                    "tva1_rate": tva1_rate,
+                    "ttc": total_ttc,
+                    "no_vat": False
+                }
+
+            safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in company["name"])
+            filename = os.path.join(Z_CAISSE_OUTPUT_DIR, f"Z_{safe_name}_{z_date.strftime('%Y%m%d')}_{z_numero.replace('-', '_')}.pdf")
+            draw_z_caisse_pdf(filename, company, z_date, z_caisse, z_numero, categories_data, paiements_data, totals, ecart)
+            generated_files.append(filename)
+
+        self.status_var.set(f"{len(generated_files)} Z de caisse générés dans {os.path.abspath(Z_CAISSE_OUTPUT_DIR)}")
+        messagebox.showinfo("Succès",
+                            f"{len(generated_files)} Z de caisse générés dans\n{os.path.abspath(Z_CAISSE_OUTPUT_DIR)}",
                             parent=self.root)
 
 def main():
