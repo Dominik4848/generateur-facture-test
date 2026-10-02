@@ -1,45 +1,19 @@
 @echo off
-setlocal
-cd /d "%~dp0"
+rem Installe (ou met a jour) le Generateur de factures depuis la derniere Release GitHub :
+rem   - telecharge Generateur_Factures.exe dans Documents\Generateur de factures
+rem   - cree le raccourci "Generateur de factures" sur le Bureau
+rem La commande est identique a celle de l'option 2 du README.
 
-rem --- Python : "python" ou, a defaut, le lanceur "py"
-set PY=python
-%PY% --version >nul 2>&1 || set PY=py
-%PY% --version >nul 2>&1 || (
-    echo [ERREUR] Python est introuvable. Installe-le depuis le Software Center ou python.org,
-    echo          en cochant "Add python.exe to PATH", puis relance ce script.
-    pause
-    exit /b 1
-)
-
-echo [1/3] Installation des dependances...
-%PY% -m pip install --quiet --disable-pip-version-check -r requirements.txt || goto :erreur
-
-echo [2/3] Construction de l'executable...
 tasklist /fi "imagename eq Generateur_Factures.exe" | find /i "Generateur_Factures.exe" >nul && (
-    echo [ERREUR] Generateur_Factures.exe est ouvert : ferme-le puis relance ce script.
+    echo [ERREUR] Le Generateur de factures est ouvert : ferme-le puis relance ce script.
     pause
     exit /b 1
 )
-%PY% -m PyInstaller --noconfirm --log-level WARN Generateur_Factures.spec || goto :erreur
 
-echo [3/3] Creation du raccourci sur le Bureau...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$exe = Join-Path (Resolve-Path 'dist') 'Generateur_Factures.exe';" ^
-  "$lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Generateur de factures.lnk';" ^
-  "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk);" ^
-  "$s.TargetPath = $exe; $s.WorkingDirectory = Split-Path $exe; $s.IconLocation = $exe;" ^
-  "$s.Description = 'Generateur de documents de test'; $s.Save();" ^
-  "Write-Host ('Raccourci cree : ' + $lnk)" || goto :erreur
-
-echo.
-echo Termine. Lance l'application depuis le raccourci "Generateur de factures" sur ton Bureau.
-echo Les PDF sont crees dans le dossier dist\ (factures_sortie, z_caisse_sortie, rib_sortie).
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol='Tls12'; $d=Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Generateur de factures'; $exe=Join-Path $d 'Generateur_Factures.exe'; New-Item -ItemType Directory -Force $d | Out-Null; Invoke-WebRequest 'https://github.com/Dominik4848/generateur-facture-test/releases/latest/download/Generateur_Factures.exe' -OutFile ($exe + '.part') -UseBasicParsing; Move-Item -Force ($exe + '.part') $exe; Unblock-File $exe; $s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Generateur de factures.lnk')); $s.TargetPath=$exe; $s.WorkingDirectory=$d; $s.IconLocation=$exe; $s.Save(); Write-Host ('Installe dans ' + $d + ' - raccourci cree sur le Bureau.')" || (
+    echo.
+    echo [ERREUR] L'installation a echoue, voir le message ci-dessus.
+    pause
+    exit /b 1
+)
 pause
-exit /b 0
-
-:erreur
-echo.
-echo [ERREUR] L'installation a echoue, voir les messages ci-dessus.
-pause
-exit /b 1
