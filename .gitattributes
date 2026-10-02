@@ -1,0 +1,2 @@
+# Les scripts batch doivent rester en CRLF, sinon cmd.exe gère mal les labels/goto
+*.bat text eol=crlf

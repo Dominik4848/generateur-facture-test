@@ -32,7 +32,7 @@ def generate_invoice_number(prefix, idx):
     return f"{prefix}{datetime.datetime.now().strftime('%Y%m%d')}-{idx:04d}"
 
 
-def generate_items(custom_amounts=None, max_total_ht=None, account_type="700"):
+def generate_items(custom_amounts=None, max_total_ht=None, account_type="700", min_lines=1):
     items = []
     cap_ht = decimal_round(Decimal(str(max_total_ht))) if max_total_ht is not None else None
     descriptions = ITEM_DESCRIPTIONS_BY_ACCOUNT.get(account_type, ITEM_DESCRIPTIONS_BY_ACCOUNT["700"])
@@ -54,7 +54,7 @@ def generate_items(custom_amounts=None, max_total_ht=None, account_type="700"):
             items.append({"desc": desc, "qty": 1, "unit": amt, "total": amt})
         return items
 
-    for _ in range(random.randint(1, 5)):
+    for _ in range(random.randint(min(min_lines, 5), 5) if min_lines <= 5 else min_lines):
         desc = random.choice(descriptions)
         qty = random.randint(1, 10)
         unit = decimal_round(random.uniform(20.0, 1200.0))
@@ -107,7 +107,9 @@ def draw_invoice_pdf(
     account_type="700",
     bank_iban=None,
     bank_bic=None,
+    client=None,
 ):
+    client = client or {"name": CLIENT_NAME, "address": CLIENT_ADDRESS}
     c = canvas.Canvas(filename, pagesize=(PAGE_WIDTH, PAGE_HEIGHT))
     c.setTitle(f"Facture {invoice_no}")
     margin_left, y = 20 * mm, PAGE_HEIGHT - 20 * mm
@@ -140,32 +142,47 @@ def draw_invoice_pdf(
     c.drawString(margin_left, y, client_label)
     c.setFont("Helvetica", FONT_SIZE)
     y -= 6 * mm
-    c.drawString(margin_left, y, CLIENT_NAME)
+    c.drawString(margin_left, y, client["name"])
     y -= 5 * mm
-    for line in CLIENT_ADDRESS:
+    for line in client.get("address", []):
         c.drawString(margin_left, y, line)
+        y -= 5 * mm
+    if client.get("siret"):
+        c.drawString(margin_left, y, f"SIRET: {client['siret']}")
         y -= 5 * mm
 
     y -= 8 * mm
     table_x = margin_left
+    line_rates = [Decimal(it.get("vat", vat_rate)) for it in items]
+    # Colonne TVA uniquement quand la facture mélange plusieurs taux.
+    multi_rate = len(set(line_rates)) > 1
     qty_col_x, unit_col_x, total_col_x = table_x + 100 * mm, table_x + 130 * mm, table_x + 170 * mm
+    vat_col_x = table_x + 115 * mm
+    if multi_rate:
+        qty_col_x, unit_col_x = table_x + 95 * mm, table_x + 140 * mm
     c.setStrokeColor(colors.black)
     c.setLineWidth(0.5)
     c.rect(table_x - 2, y - 3 * mm, PAGE_WIDTH - 2 * margin_left + 4, 8 * mm, stroke=1, fill=0)
     c.setFont("Helvetica-Bold", FONT_SIZE)
     c.drawString(table_x, y, "Description")
     c.drawRightString(qty_col_x, y, "Qté")
+    if multi_rate:
+        c.drawRightString(vat_col_x, y, "TVA")
     c.drawRightString(unit_col_x, y, "PU")
     c.drawRightString(total_col_x, y, f"Total ({currency})")
     y -= 8 * mm
 
     c.setFont("Helvetica", FONT_SIZE)
     sub_total = Decimal("0.00")
-    for it in items:
+    base_by_rate = {}
+    for it, rate in zip(items, line_rates):
         qty, unit = it["qty"], decimal_round(it["unit"])
         line_total = decimal_round(unit * qty)
+        base_by_rate[rate] = base_by_rate.get(rate, Decimal("0.00")) + line_total
         c.drawString(table_x, y, it["desc"])
         c.drawRightString(qty_col_x, y, str(qty))
+        if multi_rate:
+            c.drawRightString(vat_col_x, y, f"{rate.normalize():f} %")
         c.drawRightString(unit_col_x, y, f"{unit:.2f}")
         c.drawRightString(total_col_x, y, f"{line_total:.2f}")
         sub_total += line_total
@@ -179,10 +196,16 @@ def draw_invoice_pdf(
     y -= 8 * mm
     c.drawRightString(PAGE_WIDTH - margin_left, y, f"Sous-total: {decimal_round(sub_total):.2f} {currency}")
     y -= 6 * mm
-    vat_rate_decimal = Decimal(vat_rate)
-    vat_amount = decimal_round(sub_total * vat_rate_decimal / Decimal(100))
-    c.drawRightString(PAGE_WIDTH - margin_left, y, f"TVA ({vat_rate_decimal}%): {vat_amount:.2f} {currency}")
-    y -= 6 * mm
+    vat_amount = Decimal("0.00")
+    # Une ligne de TVA par taux, du plus élevé au plus faible.
+    for rate in sorted(base_by_rate, reverse=True):
+        rate_vat = decimal_round(base_by_rate[rate] * rate / Decimal(100))
+        vat_amount += rate_vat
+        label = f"TVA ({rate.normalize():f}%)"
+        if multi_rate:
+            label += f" sur {decimal_round(base_by_rate[rate]):.2f}"
+        c.drawRightString(PAGE_WIDTH - margin_left, y, f"{label}: {rate_vat:.2f} {currency}")
+        y -= 6 * mm
     total = decimal_round(sub_total + vat_amount)
     c.setFont("Helvetica-Bold", FONT_SIZE)
     c.drawRightString(PAGE_WIDTH - margin_left, y, f"Total TTC: {total:.2f} {currency}")

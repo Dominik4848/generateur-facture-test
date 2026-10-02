@@ -1,10 +1,18 @@
 import os
+import sys
 from decimal import Decimal, ROUND_HALF_UP
 
 from reportlab.lib.pagesizes import A4
 
+# Ressources embarquées (thème) : à côté du script, ou dans le dossier
+# d'extraction temporaire de PyInstaller.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(BASE_DIR)
+# Dossier où écrire les PDF : à côté de l'exe une fois packagé
+# (sinon les fichiers finiraient dans %TEMP%), racine du projet en dev.
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    PROJECT_ROOT = os.path.dirname(BASE_DIR)
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "factures_sortie")
 Z_CAISSE_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "z_caisse_sortie")
 RIB_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "rib_sortie")
@@ -26,6 +34,17 @@ SAMPLE_COMPANIES = [
     {"name": "SARL Theta", "address": ["21 Avenue des Arts", "67000 Strasbourg"], "siret": "555 666 777 00080"},
     {"name": "SA Iota", "address": ["8 Boulevard du Centre", "59000 Lille"], "siret": "666 777 888 00090"},
     {"name": "SARL Kappa", "address": ["15 Rue des Forges", "25000 Besançon"], "siret": "777 888 999 00100"},
+]
+
+SAMPLE_CLIENTS = [
+    {"name": CLIENT_NAME, "address": CLIENT_ADDRESS},
+    {"name": "Jean Dupont", "address": ["4 rue des Écoles", "21000 Dijon", "France"]},
+    {"name": "Marie Lefèvre", "address": ["27 avenue Victor Hugo", "35000 Rennes", "France"]},
+    {"name": "SARL Horizon", "address": ["10 quai des Brumes", "76600 Le Havre"], "siret": "888 999 000 00110"},
+    {"name": "SAS Boréal", "address": ["2 rue du Glacier", "38000 Grenoble"], "siret": "999 000 111 00120"},
+    {"name": "EARL des Prés", "address": ["Lieu-dit Les Prés", "72000 Le Mans"], "siret": "121 212 121 00130"},
+    {"name": "Association Les Amis du Livre", "address": ["6 place de la Mairie", "87000 Limoges"]},
+    {"name": "Cabinet Moreau", "address": ["33 cours Lafayette", "69003 Lyon"], "siret": "343 434 343 00140"},
 ]
 
 MAX_INVOICES = len(SAMPLE_COMPANIES)

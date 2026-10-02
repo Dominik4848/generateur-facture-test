@@ -1,2 +1,21 @@
-/factures_sortie/
-/factures_sortie/*
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Build PyInstaller (régénérés par installer.bat)
+build/
+dist/
+
+# PDF générés par l'application
+factures_sortie/
+z_caisse_sortie/
+rib_sortie/
+*.pdf
+
+# Éditeurs / système
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
