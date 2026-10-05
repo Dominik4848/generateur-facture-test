@@ -16,6 +16,7 @@ else:
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "factures_sortie")
 Z_CAISSE_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "z_caisse_sortie")
 RIB_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "rib_sortie")
+TEMPLATES_PATH = os.path.join(PROJECT_ROOT, "modeles.json")
 FONT_SIZE = 11
 PAGE_WIDTH, PAGE_HEIGHT = A4
 CURRENCY = "€"

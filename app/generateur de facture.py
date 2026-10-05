@@ -4,7 +4,7 @@ import datetime
 import tkinter as tk
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import Callable, Optional
 
 from data import (
@@ -19,6 +19,7 @@ from data import (
     OUTPUT_DIR,
     Z_CAISSE_OUTPUT_DIR,
     RIB_OUTPUT_DIR,
+    TEMPLATES_PATH,
     RIB_PROVENANCE_LABELS,
     SAMPLE_BANKS_BY_RIB_PROVENANCE,
     ITEM_DESCRIPTIONS_BY_ACCOUNT,
@@ -38,12 +39,19 @@ from rib_pdf import (
     ensure_rib_output_dir,
     draw_rib_pdf,
 )
+from templates import TABS as TEMPLATE_TABS, TemplateStore
+import theme_perf
 
 
 MAX_Z = 10
 LABEL_WIDTH = 22
 DATE_FORMATS = ("%d-%m-%Y", "%d/%m/%Y")
 RANDOM_COMPANY_LABEL = "Au hasard"
+NO_TEMPLATE_LABEL = "Aucun modèle enregistré"
+# Défilement : un cran de molette = SCROLL_STEPS_PER_NOTCH × SCROLL_STEP_PX pixels.
+SCROLL_STEP_PX = 20
+SCROLL_STEPS_PER_NOTCH = 3
+SCROLL_BATCH_MS = 15
 
 # Les deux parties d'une facture, personnalisables de la même façon.
 # (clé, titre de section, libellés des 3 modes, pool aléatoire, nom par défaut)
@@ -244,7 +252,9 @@ class ScrollableFrame(ttk.Frame):
 
     def __init__(self, parent, bg):
         super().__init__(parent)
-        self.canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0, bg=bg)
+        self.canvas = tk.Canvas(
+            self, borderwidth=0, highlightthickness=0, bg=bg, yscrollincrement=SCROLL_STEP_PX,
+        )
         self.vbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.vbar.set)
         self.canvas.grid(row=0, column=0, sticky="nsew")
@@ -253,6 +263,8 @@ class ScrollableFrame(ttk.Frame):
         self.columnconfigure(0, weight=1)
 
         self._refresh_pending = None
+        self._scroll_pending = None
+        self._pending_delta = 0
         self.body = ttk.Frame(self.canvas)
         self._window = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
         self.body.bind("<Configure>", lambda e: self._update_scrollregion())
@@ -288,8 +300,21 @@ class ScrollableFrame(ttk.Frame):
         return self.canvas.yview() != (0.0, 1.0)
 
     def scroll(self, delta):
-        if self.can_scroll():
-            self.canvas.yview_scroll(int(-delta / 120) or (-1 if delta > 0 else 1), "units")
+        """Les crans de molette sont cumulés puis appliqués en une fois : redessiner les widgets
+        du thème est lent, et un redessin par cran accumulerait du retard."""
+        if not self.can_scroll():
+            return
+        self._pending_delta += delta
+        if self._scroll_pending is None:
+            self._scroll_pending = self.after(SCROLL_BATCH_MS, self._apply_scroll)
+
+    def _apply_scroll(self):
+        self._scroll_pending = None
+        # Le reste (pavé tactile : petits deltas) est gardé pour l'événement suivant.
+        steps = int(self._pending_delta / 120 * SCROLL_STEPS_PER_NOTCH)
+        self._pending_delta -= steps * 120 / SCROLL_STEPS_PER_NOTCH
+        if steps:
+            self.canvas.yview_scroll(-steps, "units")
 
     def scroll_to(self, widget):
         self.update_idletasks()
@@ -364,10 +389,44 @@ class InvoiceGeneratorApp:
         self.rib_bic_var = tk.StringVar()
         self.rib_spaces_var = tk.BooleanVar(value=True)
 
+        # Variables simples enregistrées dans les modèles, par onglet.
+        self.template_vars: dict[str, dict[str, tk.Variable]] = {
+            "facture": {
+                "n": self.n_var, "vente_700": self.vente_700_var, "achat_600": self.achat_600_var,
+                **{f"{party}_mode": var for party, var in self.party_modes.items()},
+                "vat_mode": self.vat_mode_var, "vat": self.vat_var, "vat_multi": self.vat_multi_var,
+                "micro": self.micro_var, "custom_lines": self.custom_lines_var,
+                "custom_dates": self.custom_dates_var, "prefix": self.prefix_var,
+                "file_prefix": self.file_prefix_var, "max_total": self.max_total_var,
+            },
+            "z": {
+                "n": self.z_n_var, "company": self.z_company_var, "profile": self.z_profile_var,
+                "date": self.z_date_var, "caisse": self.z_caisse_var, "numero": self.z_numero_var,
+                "random_amounts": self.z_random_amounts_var, "tva_mode": self.z_tva_mode_var,
+                "tva1": self.z_tva1_var, "tva2": self.z_tva2_var, "ecart": self.z_ecart_var,
+                "ecart_amount": self.z_ecart_amount_var,
+            },
+            "rib": {
+                "provenance": self.rib_provenance_var, "bank": self.rib_bank_var, "iban": self.rib_iban_var,
+                "bic": self.rib_bic_var, "spaces": self.rib_spaces_var,
+            },
+        }
+        self.template_store = TemplateStore(TEMPLATES_PATH)
+        self.template_name_vars = {tab: tk.StringVar() for tab in TEMPLATE_TABS}
+        self.template_combos: dict[str, ttk.Combobox] = {}
+        self.template_delete_buttons: dict[str, ttk.Button] = {}
+
         self.fields: dict[str, list[Field]] = {"facture": [], "z": [], "rib": []}
         self.status_labels: dict[str, ttk.Label] = {}
         self.scrolls: dict[str, ScrollableFrame] = {}
         self._build_ui()
+
+        # Valeurs de départ, pour « Réinitialiser » ; le RIB en reprend un nouveau au hasard.
+        self.default_states = {tab: self._capture_state(tab) for tab in TEMPLATE_TABS}
+        for name in ("iban", "bic"):
+            self.default_states["rib"].pop(name)
+        self._restore_last_session()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ------------------------------------------------------------------
     # Thème et structure générale
@@ -379,6 +438,7 @@ class InvoiceGeneratorApp:
             os.path.join(BASE_DIR, "Azure-ttk-theme", "azure.tcl"),
             os.path.join(BASE_DIR, "azure.tcl"),
         ]
+        theme_perf.install(self.root)
         for theme_path in theme_candidates:
             if not os.path.exists(theme_path):
                 continue
@@ -391,6 +451,7 @@ class InvoiceGeneratorApp:
                 break
             except Exception:
                 continue
+        theme_perf.uninstall(self.root)
 
         azure_active = False
         try:
@@ -470,16 +531,19 @@ class InvoiceGeneratorApp:
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text=f"  {title}  ")
         tab.columnconfigure(0, weight=1)
-        tab.rowconfigure(0, weight=1)
+        tab.rowconfigure(2, weight=1)
+
+        self._build_template_bar(tab, key)
+        ttk.Separator(tab).grid(row=1, column=0, sticky="ew")
 
         scroll = ScrollableFrame(tab, self.bg_color)
-        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=2, column=0, sticky="nsew")
         scroll.body.columnconfigure(0, weight=1)
         self.scrolls[key] = scroll
 
-        ttk.Separator(tab).grid(row=1, column=0, sticky="ew")
+        ttk.Separator(tab).grid(row=3, column=0, sticky="ew")
         bar = ttk.Frame(tab, padding=(14, 10))
-        bar.grid(row=2, column=0, sticky="ew")
+        bar.grid(row=4, column=0, sticky="ew")
         bar.columnconfigure(0, weight=1)
 
         status = ttk.Label(bar, text="", justify="left")
@@ -569,6 +633,251 @@ class InvoiceGeneratorApp:
     def _busy(self, busy):
         self.root.configure(cursor="watch" if busy else "")
         self.root.update_idletasks()
+
+    # ------------------------------------------------------------------
+    # Modèles et dernière session
+    # ------------------------------------------------------------------
+
+    def _build_template_bar(self, tab, key):
+        bar = ttk.Frame(tab, padding=(14, 8))
+        bar.grid(row=0, column=0, sticky="ew")
+        ttk.Label(bar, text="Modèle").pack(side="left", padx=(0, 8))
+        combo = ttk.Combobox(bar, textvariable=self.template_name_vars[key], state="readonly", width=32)
+        combo.pack(side="left")
+        combo.bind("<<ComboboxSelected>>", lambda e: self._load_template(key))
+        ttk.Button(bar, text="Enregistrer…", command=lambda: self._save_template(key)).pack(
+            side="left", padx=(8, 0)
+        )
+        delete = ttk.Button(bar, text="Supprimer", command=lambda: self._delete_template(key))
+        delete.pack(side="left", padx=(8, 0))
+        ttk.Button(bar, text="Réinitialiser", command=lambda: self._reset_tab(key)).pack(side="right")
+        self.template_combos[key] = combo
+        self.template_delete_buttons[key] = delete
+        self._refresh_template_choices(key)
+
+    def _selected_template(self, key):
+        name = self.template_name_vars[key].get()
+        return name if name in self.template_store.templates[key] else None
+
+    def _refresh_template_choices(self, key, selected=None):
+        names = self.template_store.names(key)
+        combo, var = self.template_combos[key], self.template_name_vars[key]
+        combo.configure(values=names)
+        if names:
+            combo.state(["!disabled"])
+            var.set(selected if selected in names else "")
+        else:
+            combo.state(["disabled"])
+            var.set(NO_TEMPLATE_LABEL)
+        self.template_delete_buttons[key].state(["!disabled"] if selected in names else ["disabled"])
+
+    def _load_template(self, key):
+        name = self._selected_template(key)
+        if name is None:
+            return
+        self.template_delete_buttons[key].state(["!disabled"])
+        if self._apply_state(key, self.template_store.get(key, name)):
+            self._set_status(key, f"Modèle « {name} » chargé.", "info")
+        else:
+            self._set_status(key, f"✗ Le modèle « {name} » est illisible ou incomplet.", "error")
+
+    def _save_template(self, key):
+        current = self._selected_template(key)
+        name = self._ask_template_name(current or "")
+        if name is None:
+            return
+        # Réenregistrer le modèle chargé le met à jour ; écraser un autre modèle demande confirmation.
+        if name != current and name in self.template_store.templates[key] and not messagebox.askyesno(
+            "Modèle existant", f"Le modèle « {name} » existe déjà. Le remplacer ?", parent=self.root,
+        ):
+            return
+        try:
+            self.template_store.save(key, name, self._capture_state(key))
+        except OSError as exc:
+            self._set_status(key, f"✗ Impossible d'enregistrer le modèle : {exc}", "error")
+            return
+        self._refresh_template_choices(key, name)
+        self._set_status(key, f"✓ Modèle « {name} » enregistré.", "ok")
+
+    def _delete_template(self, key):
+        name = self._selected_template(key)
+        if name is None or not messagebox.askyesno(
+            "Supprimer le modèle", f"Supprimer le modèle « {name} » ?", parent=self.root,
+        ):
+            return
+        try:
+            self.template_store.delete(key, name)
+        except OSError as exc:
+            self._set_status(key, f"✗ Impossible de supprimer le modèle : {exc}", "error")
+            return
+        self._refresh_template_choices(key)
+        self._set_status(key, f"Modèle « {name} » supprimé.", "info")
+
+    def _reset_tab(self, key):
+        self._apply_state(key, self.default_states[key])
+        self._refresh_template_choices(key)
+        self._set_status(key, "Champs remis aux valeurs par défaut.", "info")
+
+    def _ask_template_name(self, initial):
+        """Petite fenêtre modale qui demande un nom ; None si annulée."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Enregistrer le modèle")
+        dialog.transient(self.root)
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.bg_color)
+        frame = ttk.Frame(dialog, padding=16)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Nom du modèle").pack(anchor="w")
+        name_var = tk.StringVar(value=initial)
+        entry = ttk.Entry(frame, textvariable=name_var, width=40)
+        entry.pack(fill="x", pady=(4, 2))
+        ttk.Label(
+            frame, text="Les champs actuels de l'onglet seront enregistrés sous ce nom.", foreground=COLOR_HINT,
+        ).pack(anchor="w", pady=(0, 12))
+        buttons = ttk.Frame(frame)
+        buttons.pack(anchor="e")
+        result = {}
+
+        def confirm(_event=None):
+            name = name_var.get().strip()
+            if not name:
+                dialog.bell()
+                return
+            result["name"] = name
+            dialog.destroy()
+
+        ttk.Button(buttons, text="Annuler", command=dialog.destroy).pack(side="right")
+        ttk.Button(buttons, text="Enregistrer", style="Accent.TButton", command=confirm).pack(
+            side="right", padx=(0, 8)
+        )
+        dialog.bind("<Return>", confirm)
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+
+        dialog.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dialog.winfo_reqwidth()) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog.winfo_reqheight()) // 3
+        dialog.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        entry.select_range(0, "end")
+        entry.focus_set()
+        dialog.grab_set()
+        self.root.wait_window(dialog)
+        return result.get("name")
+
+    def _restore_last_session(self):
+        for key, state in self.template_store.last_session.items():
+            self._apply_state(key, state)
+        if self.template_store.backup_name:
+            self._set_status(
+                "facture",
+                f"⚠ {os.path.basename(TEMPLATES_PATH)} était illisible : il a été mis de côté sous "
+                f"« {self.template_store.backup_name} ».",
+                "error",
+            )
+
+    def _on_close(self):
+        try:
+            self.template_store.save_session({key: self._capture_state(key) for key in TEMPLATE_TABS})
+        except OSError:
+            pass  # Ne jamais empêcher la fermeture pour une sauvegarde de confort.
+        finally:
+            self.root.destroy()
+
+    # Lecture / écriture de l'état des onglets ---------------------------
+
+    def _capture_state(self, key):
+        state = {name: var.get() for name, var in self.template_vars[key].items()}
+        if key == "facture":
+            n = self._invoice_count() or len(self.invoice_cards)
+            state["vat_before_micro"] = self._vat_before_micro
+            state["advanced_open"] = self.advanced_open
+            state["party_single"] = {party: self._party_state(inputs) for party, inputs in self.party_single.items()}
+            state["cards"] = [
+                {
+                    "parties": {party: self._party_state(inputs) for party, inputs in card.parties.items()},
+                    "lines": [
+                        [v.get() for v in (line.desc_var, line.qty_var, line.unit_var, line.vat_var)]
+                        for line in card.lines
+                    ],
+                    "inv_date": card.inv_date_var.get(),
+                    "due_date": card.due_date_var.get(),
+                }
+                for card in self.invoice_cards[:n]
+            ]
+        elif key == "z":
+            state["paiements"] = {paiement: var.get() for paiement, var in self.z_paiements_vars.items()}
+        return state
+
+    def _apply_state(self, key, state):
+        """Remplit l'onglet avec un état enregistré ; False si l'état est illisible."""
+        appliers = {"facture": self._apply_invoice_state, "z": self._apply_z_state, "rib": self._apply_rib_state}
+        try:
+            appliers[key](state)
+        except (AttributeError, KeyError, TypeError, ValueError, tk.TclError):
+            return False
+        return True
+
+    def _set_vars(self, key, state):
+        """Variables simples ; une clé absente (ancien modèle) garde la valeur actuelle."""
+        for name, var in self.template_vars[key].items():
+            if name in state:
+                value = state[name]
+                var.set(bool(value) if isinstance(var, tk.BooleanVar) else str(value))
+
+    @staticmethod
+    def _party_state(inputs):
+        return {"name": inputs.name_var.get(), "address": inputs.address_var.get(), "siret": inputs.siret_var.get()}
+
+    @staticmethod
+    def _set_party_state(inputs, state):
+        for name, var in (("name", inputs.name_var), ("address", inputs.address_var), ("siret", inputs.siret_var)):
+            var.set(str(state.get(name, "")))
+
+    def _apply_invoice_state(self, state):
+        # Le nombre de factures crée les cartes manquantes ; les taux de TVA passent avant les lignes.
+        self._set_vars("facture", state)
+        self._vat_before_micro = str(state.get("vat_before_micro", self._vat_before_micro))
+        party_single = state.get("party_single", {})
+        for party, inputs in self.party_single.items():
+            self._set_party_state(inputs, party_single.get(party, {}))
+        cards = state.get("cards", [])
+        # Les cartes absentes du modèle sont vidées : le modèle remplace toute la saisie.
+        for i, card in enumerate(self.invoice_cards):
+            data = cards[i] if i < len(cards) else {}
+            parties = data.get("parties", {})
+            for party, inputs in card.parties.items():
+                self._set_party_state(inputs, parties.get(party, {}))
+            card.inv_date_var.set(str(data.get("inv_date", "")))
+            card.due_date_var.set(str(data.get("due_date", "")))
+            for line in list(card.lines):
+                self._remove_line(card, line)
+            for values in data.get("lines") or [[]]:
+                values = [str(v) for v in values][:4]
+                self._add_line(card, tuple(values + [""] * (4 - len(values))))
+        self._set_advanced_open(bool(state.get("advanced_open", self.advanced_open)))
+        self._on_party_mode_change()
+        self._update_vat_fields()
+
+    def _apply_z_state(self, state):
+        # Le type de commerce est posé sans _on_z_profile_change : les taux du modèle sont gardés.
+        self._set_vars("z", state)
+        if self.z_company_var.get() not in {c["name"] for c in SAMPLE_COMPANIES}:
+            self.z_company_var.set(RANDOM_COMPANY_LABEL)
+        if self._z_profile_key() is None:
+            self.z_profile_var.set(next(iter(self.z_profile_by_label)))
+        for paiement, amount in dict(state.get("paiements", {})).items():
+            self.z_paiements_vars.setdefault(paiement, tk.StringVar()).set(str(amount))
+        self._update_z_paiements()
+        self._update_z_tva_fields_visibility()
+        self._update_z_ecart_state()
+
+    def _apply_rib_state(self, state):
+        self._set_vars("rib", state)
+        if self.rib_provenance_var.get() not in self.rib_key_by_label:
+            self.rib_provenance_var.set(RIB_PROVENANCE_LABELS["CLIENT"])
+        self._update_rib_bank_choices()
+        if not state.get("iban") or not state.get("bic"):
+            self.generate_rib()
+        self._refresh_rib_display()
 
     # ------------------------------------------------------------------
     # Onglet Factures

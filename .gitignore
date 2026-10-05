@@ -19,3 +19,8 @@ rib_sortie/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Modèles et dernière session (propres à chaque utilisateur)
+modeles.json
+modeles.json.tmp
+modeles_illisible_*.json

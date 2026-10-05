@@ -68,6 +68,17 @@ Le bouton **« Ouvrir le dossier »** de chaque onglet y mène directement. Les 
 
 **Ctrl + Entrée** génère les documents de l'onglet affiché. Un champ mal rempli s'affiche en rouge, et le bouton Générer t'y emmène directement.
 
+### Modèles
+
+La barre **Modèle** en haut de chaque onglet enregistre tous les champs pour les retrouver en un clic :
+
+- **Enregistrer…** : donne un nom, les champs actuels de l'onglet sont sauvegardés. Pour les factures, ça inclut les lignes, les dates et les sociétés / clients saisis facture par facture.
+- **Choisir un modèle dans la liste** remplit immédiatement l'onglet. Pour mettre un modèle à jour, charge-le, modifie, puis *Enregistrer…* sous le même nom.
+- **Supprimer** retire le modèle sélectionné. **Réinitialiser** remet les valeurs par défaut de l'onglet.
+
+Chaque onglet a ses propres modèles. La saisie en cours est aussi retrouvée telle quelle à la réouverture de l'application.
+Tout est stocké dans **`modeles.json`**, à côté de l'exe : il est conservé lors des mises à jour et peut être copié à un collègue.
+
 ### Factures
 
 - **Nombre** de factures (1 à 10) et **type** : Vente (700) et/ou Achat (600). Si les deux sont cochés, chaque facture est générée en deux versions, une de vente et une d'achat.
@@ -115,6 +126,8 @@ Garde exactement ces noms : les options 2 et 3 téléchargent `releases/latest/d
 │   ├── invoice_pdf.py             # PDF facture
 │   ├── z_caisse_pdf.py            # PDF Z de caisse
 │   ├── rib_pdf.py                 # PDF RIB
+│   ├── templates.py               # modèles et dernière session (modeles.json)
+│   ├── theme_perf.py              # accélère le dessin du thème Azure (défilement fluide)
 │   ├── icon.ico                   # icône de l'application
 │   └── Azure-ttk-theme/           # thème graphique (MIT, rdbende/Azure-ttk-theme)
 ├── Generateur_Factures.spec       # configuration PyInstaller
